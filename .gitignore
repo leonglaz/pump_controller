@@ -1,0 +1,46 @@
+# Build directory
+build/
+sdkconfig
+sdkconfig.old
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*~
+.project
+.cproject
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Generated files
+*.bin
+*.elf
+*.map
+*.lst
+
+# Partition tables
+*.csv
+
+# Log files
+*.log
+
+# ESP-IDF managed components
+managed_components/
+
+# Project dependencies (optional)
+dependencies.lock
+
+# ESP-IDF example specific files
+.clangd
+pytest_hello_world.py
+sdkconfig.ci
+.devcontainer/
