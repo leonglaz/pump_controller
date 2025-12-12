@@ -337,7 +337,8 @@ void blink_loop()
     TickType_t prevWakeup = 0;
     while (1)
     {   
-
+        if(task_check_power_ready)
+        {
             if(semafore)
             {
                 
@@ -357,39 +358,66 @@ void blink_loop()
                 led_state1=!led_state1;
                 vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( hours* 1000 )) ;
             }
-
+        }
         vTaskDelay(10/ portTICK_PERIOD_MS);
     }
     
 }
+bool led1_reserve;
+bool led2_reserve;
+bool leds_crush;
 
 void one_blink()
 {
+    led1_reserve=true;
+    led2_reserve=true;
+    leds_crush=true;
 
     while (1)
     {   
-        if(!semafore)
+        if(task_check_power_ready)
         {
+            if(!semafore)
+            {
             
                 if(led1_enable)
                 {
-                    gpio_set_level(GPIO_LED1, 1);
-                    gpio_set_level(GPIO_LED2, 0);
-                    ESP_LOGI(TAG, "LED1 горит резерв");
+                    if(led1_reserve)
+                    {
+                        gpio_set_level(GPIO_LED1, 1);
+                        gpio_set_level(GPIO_LED2, 0);
+                        ESP_LOGI(TAG, "LED1 горит резерв");
+                        led1_reserve=false;
+                        led2_reserve=true;
+                        leds_crush=true;
+                    }
+                    
                 }else if(led2_enable)
                             {
-                                gpio_set_level(GPIO_LED1, 0);
-                                gpio_set_level(GPIO_LED2, 1);
-                                ESP_LOGI(TAG, "LED2 горит резерв");
+                                if(led2_reserve)
+                                {
+                                    gpio_set_level(GPIO_LED1, 0);
+                                    gpio_set_level(GPIO_LED2, 1);
+                                    ESP_LOGI(TAG, "LED2 горит резерв");
+                                    led1_reserve=true;
+                                    led2_reserve=false;
+                                    leds_crush=true;
+                                }
                             } else  {
-                                        gpio_set_level(GPIO_LED1, 0);
-                                        gpio_set_level(GPIO_LED2, 0);
-                                        ESP_LOGI(TAG, "сломаны");
+                                        if(leds_crush)
+                                        {
+                                            gpio_set_level(GPIO_LED1, 0);
+                                            gpio_set_level(GPIO_LED2, 0);
+                                            ESP_LOGI(TAG, "сломаны");
+                                            led1_reserve=true;
+                                            led2_reserve=true;
+                                            leds_crush=false;
+                                        }
                                     }
+            }
+        //ESP_LOGI(TAG, "Задача blink one работает");
         }
         vTaskDelay(10/ portTICK_PERIOD_MS);
-        
-        //ESP_LOGI(TAG, "Задача blink one работает");
     }
     
 }
@@ -450,7 +478,7 @@ void check_leds()
                     }
                 }
             //ESP_LOGI(TAG, "Задача check leds работает");
-        }
+        } 
         
 
         
@@ -500,7 +528,7 @@ void check_power(void *pvParameters)
             }
         }
         //ESP_LOGI(TAG, "Задача check power работает");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
