@@ -26,10 +26,7 @@
 
 static const char *TAG = "ESP32_WebServer";
 
-TaskHandle_t xHandle_check_leds;
-TaskHandle_t xHandle_blink_loop;
-TaskHandle_t xHandle_blink_one;
-TaskHandle_t xHandle;
+
 
 // Конфигурация WiFi
 #define EXAMPLE_ESP_WIFI_SSID "ESP32_UART_Server"
@@ -51,7 +48,9 @@ static bool led1_enable = false;
 static bool led2_enable = false;
 static uint8_t hours = 1;
 bool semafore=true;
+bool task_check_power_ready=false;
 
+bool blink_loop_work=false;
 // HTML шаблон - минимальный
 static const char html_template[] = 
 "<!DOCTYPE html><html><head>"
@@ -130,6 +129,7 @@ static void wifi_init_softap(void)
 // Обработчик POST запросов - ИСПРАВЛЕННЫЙ
 static esp_err_t post_handler(httpd_req_t *req)
 {
+    
     char buf[64];
     int ret;
     int remaining = req->content_len;
@@ -151,17 +151,26 @@ static esp_err_t post_handler(httpd_req_t *req)
     buf[total_read] = '\0';
     
     ESP_LOGI(TAG, "Получено POST: %s", buf);
-    
+    int new_hours=1;
     // Парсим значение hours из формы application/x-www-form-urlencoded
     char *hours_start = strstr(buf, "hours=");
     if (hours_start) {
         hours_start += 6; // Пропускаем "hours="
-        int new_hours = atoi(hours_start);
+        new_hours = atoi(hours_start);
         if (new_hours >= 1) {
+            
+            /* if(blink_loop_work)
+            {
+                if (xHandle_blink_loop) vTaskSuspend(xHandle_blink_loop);
+                hours = new_hours;
+                if (xHandle_blink_loop) vTaskResume(xHandle_blink_loop);
+                
+            }   else hours = new_hours; */
             hours = new_hours;
-            ESP_LOGI(TAG, "Установлено %d часов", hours);
+            ESP_LOGI(TAG, "Новое время смены насосов: %d", hours);
         }
     }
+
     
     // Редирект на главную
     httpd_resp_set_status(req, "303 See Other");
@@ -325,8 +334,8 @@ static void start_webserver(void)
  */
 void blink_loop()
 {
-
-     while (1)
+    TickType_t prevWakeup = 0;
+    while (1)
     {   
 
             if(semafore)
@@ -336,16 +345,19 @@ void blink_loop()
                 {
                     gpio_set_level(GPIO_LED1, 1);
                     gpio_set_level(GPIO_LED2, 0);
+                    ESP_LOGI(TAG, "LED1 горит");
                 }else    
                         {   
                             gpio_set_level(GPIO_LED1, 0);
                             gpio_set_level(GPIO_LED2, 1);
+                            ESP_LOGI(TAG, "LED2 горит");
                         }
                 
 
                 led_state1=!led_state1;
+                vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( hours* 1000 )) ;
             }
-        vTaskDelay(hours*1000/ portTICK_PERIOD_MS);
+
         vTaskDelay(10/ portTICK_PERIOD_MS);
     }
     
@@ -356,75 +368,92 @@ void one_blink()
 
     while (1)
     {   
-
-            if(!semafore)
-            {
+        if(!semafore)
+        {
+            
                 if(led1_enable)
                 {
                     gpio_set_level(GPIO_LED1, 1);
                     gpio_set_level(GPIO_LED2, 0);
+                    ESP_LOGI(TAG, "LED1 горит резерв");
                 }else if(led2_enable)
                             {
                                 gpio_set_level(GPIO_LED1, 0);
                                 gpio_set_level(GPIO_LED2, 1);
+                                ESP_LOGI(TAG, "LED2 горит резерв");
                             } else  {
                                         gpio_set_level(GPIO_LED1, 0);
                                         gpio_set_level(GPIO_LED2, 0);
+                                        ESP_LOGI(TAG, "сломаны");
                                     }
-
-            }
-        
-        
-
+        }
         vTaskDelay(10/ portTICK_PERIOD_MS);
         
-
-                
-        
+        //ESP_LOGI(TAG, "Задача blink one работает");
     }
     
 }
 
+bool normal_work;
+
 void check_leds()
 {
+    normal_work=true;
+    
     while (1)
     {   
-        
-        if(!gpio_get_level(GPIO_ERROR1_IN))
+        if(task_check_power_ready)
         {
-            
-            led1_enable=true;
-            //gpio_set_level(GPIO_LED1, 1);
-        }
-        else 
+            if(!gpio_get_level(GPIO_ERROR1_IN))
+            {
+                
+                led1_enable=true;
+                //gpio_set_level(GPIO_LED1, 1);
+            }
+            else 
                 {
                     led1_enable=false;
                     //gpio_set_level(GPIO_LED1, 0);
                 }
 
-        if(!gpio_get_level(GPIO_ERROR2_IN))
-        {
-            led2_enable=true;
-            //gpio_set_level(GPIO_LED2, 0);
-        }
-        else    {
+            if(!gpio_get_level(GPIO_ERROR2_IN))
+            {
+                led2_enable=true;
+                //gpio_set_level(GPIO_LED2, 0);
+            }
+            else    {
                     led2_enable=false;
                     //gpio_set_level(GPIO_LED2, 1);
-                }
+                    }   
 
         
-        if(led1_enable&&led2_enable)
-        {
-            semafore=true;
-        
-        }
-        else 
+            if(led1_enable&&led2_enable)
             {
-                semafore=false;
-    
+                if(normal_work)
+                {
+                    ESP_LOGI(TAG, "Разрешена смена светодиодов");
+                    semafore=true;
+                    normal_work=false;
+                }
+                    
+                
+                
             }
+            else 
+                {   
+                    if(!normal_work)
+                    {
+                        
+                        ESP_LOGE(TAG, "Запрещена смена светодиодов");
+                        semafore=false;
+                        normal_work=true;
+                    }
+                }
+            //ESP_LOGI(TAG, "Задача check leds работает");
+        }
+        
 
-
+        
 
         vTaskDelay(10/ portTICK_PERIOD_MS);
     }
@@ -436,11 +465,9 @@ static bool tasks_suspended = true;
 void check_power(void *pvParameters)
 {
     
-    if (xHandle_check_leds) vTaskSuspend(xHandle_check_leds);
-    if (xHandle_blink_loop) vTaskSuspend(xHandle_blink_loop);
-    if (xHandle_blink_one) vTaskSuspend(xHandle_blink_one);
-        gpio_set_level(GPIO_LED1, 0);
-        gpio_set_level(GPIO_LED2, 0);
+
+    gpio_set_level(GPIO_LED1, 0);
+    gpio_set_level(GPIO_LED2, 0);
 
     tasks_suspended = true;
     
@@ -451,10 +478,8 @@ void check_power(void *pvParameters)
         {
             if(tasks_suspended)
             {
-                if (xHandle_check_leds) vTaskResume(xHandle_check_leds);
-                if (xHandle_blink_loop) vTaskResume(xHandle_blink_loop);
-                if (xHandle_blink_one) vTaskResume(xHandle_blink_one);
-                
+             
+                task_check_power_ready=true;
                 ESP_LOGI(TAG, "Задачи возобновлены");
                 tasks_suspended=false;
                 
@@ -466,16 +491,15 @@ void check_power(void *pvParameters)
         {
             if(!tasks_suspended)
             {
-                if (xHandle_check_leds) vTaskSuspend(xHandle_check_leds);
-                if (xHandle_blink_loop) vTaskSuspend(xHandle_blink_loop);
-                if (xHandle_blink_one) vTaskSuspend(xHandle_blink_one);
+                task_check_power_ready=false;
                 gpio_set_level(GPIO_LED1, 0);
                 gpio_set_level(GPIO_LED2, 0);
-                ESP_LOGI(TAG, "Задачи приостановлены");
+                ESP_LOGE(TAG, "Задачи приостановлены");
+                blink_loop_work=false;
                 tasks_suspended=true;
             }
         }
-
+        //ESP_LOGI(TAG, "Задача check power работает");
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
@@ -527,17 +551,19 @@ void app_main()
     // Запуск HTTP сервера
     start_webserver();
 
-   // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    ESP_LOGI(TAG, "Система запущена. Подключитесь к WiFi: %s", EXAMPLE_ESP_WIFI_SSID);
+    ESP_LOGI(TAG, "Откройте браузер и перейдите по адресу: http://192.168.4.1");
 
-    xTaskCreate(check_leds, "check_leds", 4096, NULL, 5, &xHandle_check_leds);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
 
-    xTaskCreate(blink_loop, "blink_loop", 4096, NULL, 5, &xHandle_blink_loop);
+    xTaskCreate(check_leds, "check_leds", 4096, NULL, 5, NULL);
 
-    xTaskCreate(one_blink,"one blink",4096, NULL, 5, &xHandle_blink_one);
+    xTaskCreate(blink_loop, "blink_loop", 4096, NULL, 5, NULL);
+
+    xTaskCreate(one_blink,"one blink",4096, NULL, 5, NULL);
 
     xTaskCreate(check_power, "check_power", 4096, NULL, 7, NULL);
 
-    ESP_LOGI(TAG, "Система запущена. Подключитесь к WiFi: %s", EXAMPLE_ESP_WIFI_SSID);
-    ESP_LOGI(TAG, "Откройте браузер и перейдите по адресу: http://192.168.4.1");
+    
 } 
 
