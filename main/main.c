@@ -46,7 +46,7 @@ static int led_state1 = 0;
 static int led_state2 = 0;
 static bool led1_enable = false;
 static bool led2_enable = false;
-static uint8_t hours = 20;
+static uint8_t hours = 10;
 bool semafore=true;
 bool task_check_power_ready=false;
 
@@ -156,20 +156,14 @@ static esp_err_t post_handler(httpd_req_t *req)
     
     ESP_LOGI(TAG, "Получено POST: %s", buf);
     int new_hours=1;
-    // Парсим значение hours из формы application/x-www-form-urlencoded
+
     char *hours_start = strstr(buf, "hours=");
     if (hours_start) {
         hours_start += 6; // Пропускаем "hours="
         new_hours = atoi(hours_start);
         if (new_hours >= 1) {
             
-            /* if(blink_loop_work)
-            {
-                if (xHandle_blink_loop) vTaskSuspend(xHandle_blink_loop);
-                hours = new_hours;
-                if (xHandle_blink_loop) vTaskResume(xHandle_blink_loop);
-                
-            }   else hours = new_hours; */
+            
             hours = new_hours;
             ESP_LOGI(TAG, "Новое время смены насосов: %d", hours);
         }
@@ -336,7 +330,7 @@ void blink_loop()
                 {
                     gpio_set_level(GPIO_LED1, 1);
                     gpio_set_level(GPIO_LED2, 0);
-                    ESP_LOGI(TAG, "LED1 горит %d, time %d", i,  led1_work_time);
+                    ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
                     led1_work=true;
                     led1_work=true;
                     led2_work=false;
@@ -344,7 +338,7 @@ void blink_loop()
                         {   
                             gpio_set_level(GPIO_LED1, 0);
                             gpio_set_level(GPIO_LED2, 1);
-                            ESP_LOGI(TAG, "LED2 горит %d, time %d", i,  led2_work_time);
+                            ESP_LOGI(TAG, "LED2 горит %d, time2 %d", i,  led2_work_time);
                             led1_work=false;
                             led2_work=true;
                         }
@@ -394,9 +388,9 @@ void one_blink()
                         led1_reserve=false;
                         led2_reserve=true;
                         leds_crush=true;
-                        
+
                         led1_work=true;
-                        led2_work=true;
+                        led2_work=false;
                     }
                     
                 }else if(led2_enable)
@@ -443,7 +437,11 @@ void check_leds()
     while (1)
     {   
         if(task_check_power_ready)
-        {
+        {   
+            if(gpio_get_level(GPIO_ERROR1_IN))
+            {
+                vTaskDelay(50);
+            }
             if(!gpio_get_level(GPIO_ERROR1_IN))
             {
                 
@@ -455,6 +453,10 @@ void check_leds()
                     led1_enable=false;
                     //gpio_set_level(GPIO_LED1, 0);
                 }
+            if(gpio_get_level(GPIO_ERROR2_IN))
+            {
+                vTaskDelay(50);
+            }
 
             if(!gpio_get_level(GPIO_ERROR2_IN))
             {
@@ -495,7 +497,7 @@ void check_leds()
 
         
 
-        vTaskDelay(10/ portTICK_PERIOD_MS);
+        vTaskDelay(100/ portTICK_PERIOD_MS);
     }
     
 }
@@ -514,13 +516,18 @@ void check_power(void *pvParameters)
     while (1)
     {   
 
+        if(!gpio_get_level(GPIO_ERROR1_IN))
+        {
+            vTaskDelay(50);
+        }
+
         if(gpio_get_level(GPIO_BUTTON_POWER))
         {
             if(tasks_suspended)
             {
              
                 task_check_power_ready=true;
-                ESP_LOGI(TAG, "Задачи возобновлены");
+                ESP_LOGI(TAG, "контроллер включен");
                 tasks_suspended=false;
                 
             }
@@ -534,7 +541,7 @@ void check_power(void *pvParameters)
                 task_check_power_ready=false;
                 gpio_set_level(GPIO_LED1, 0);
                 gpio_set_level(GPIO_LED2, 0);
-                ESP_LOGE(TAG, "Задачи приостановлены");
+                ESP_LOGE(TAG, "контроллер выключен");
                 blink_loop_work=false;
                 tasks_suspended=true;
             }
