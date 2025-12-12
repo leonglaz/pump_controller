@@ -24,7 +24,7 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
-static const char *TAG = "ESP32_WebServer";
+static const char *TAG = "Pump_Conroller";
 
 
 
@@ -46,9 +46,13 @@ static int led_state1 = 0;
 static int led_state2 = 0;
 static bool led1_enable = false;
 static bool led2_enable = false;
-static uint8_t hours = 1;
+static uint8_t hours = 20;
 bool semafore=true;
 bool task_check_power_ready=false;
+
+uint16_t led1_work_time=1;
+uint16_t led2_work_time=1;
+
 
 bool blink_loop_work=false;
 // HTML шаблон - минимальный
@@ -307,34 +311,20 @@ static void start_webserver(void)
     }
 }
 
-/* void blink_loop()
-{
 
-     while (1)
-    {   
+bool led1_work;
+bool led2_work;
 
-            if(semafore)
-            {
-                
-                if(led_state1)
-                {
-                    gpio_set_level(GPIO_LED1, 1);
-                    gpio_set_level(GPIO_LED2, 0);
-                }else    
-                        {   
-                            gpio_set_level(GPIO_LED1, 0);
-                            gpio_set_level(GPIO_LED2, 1);
-                        }
-                led_state1=!led_state1;
-            }
-        vTaskDelay(hours*1000/ portTICK_PERIOD_MS);
-    }
-    
-}
- */
 void blink_loop()
 {
     TickType_t prevWakeup = 0;
+    uint16_t i=0;
+    uint16_t work_time=0;
+
+/*     task_check_power_ready=true;
+    semafore=true;
+    led_state1=true; */
+    
     while (1)
     {   
         if(task_check_power_ready)
@@ -346,17 +336,31 @@ void blink_loop()
                 {
                     gpio_set_level(GPIO_LED1, 1);
                     gpio_set_level(GPIO_LED2, 0);
-                    ESP_LOGI(TAG, "LED1 горит");
+                    ESP_LOGI(TAG, "LED1 горит %d, time %d", i,  led1_work_time);
+                    led1_work=true;
+                    led1_work=true;
+                    led2_work=false;
                 }else    
                         {   
                             gpio_set_level(GPIO_LED1, 0);
                             gpio_set_level(GPIO_LED2, 1);
-                            ESP_LOGI(TAG, "LED2 горит");
+                            ESP_LOGI(TAG, "LED2 горит %d, time %d", i,  led2_work_time);
+                            led1_work=false;
+                            led2_work=true;
                         }
                 
+                if(led1_work)
+                work_time=led1_work_time;
+                if (led2_work)
+                work_time=led2_work_time;
 
-                led_state1=!led_state1;
-                vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( hours* 1000 )) ;
+                if  (work_time>=(hours))            
+                {
+                    led_state1=!led_state1;
+                    i=0;
+                }
+                i++;
+                vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( 1000 )) ;
             }
         }
         vTaskDelay(10/ portTICK_PERIOD_MS);
@@ -390,6 +394,9 @@ void one_blink()
                         led1_reserve=false;
                         led2_reserve=true;
                         leds_crush=true;
+                        
+                        led1_work=true;
+                        led2_work=true;
                     }
                     
                 }else if(led2_enable)
@@ -402,6 +409,8 @@ void one_blink()
                                     led1_reserve=true;
                                     led2_reserve=false;
                                     leds_crush=true;
+                                    led1_work=false;
+                                    led2_work=true;
                                 }
                             } else  {
                                         if(leds_crush)
@@ -412,6 +421,9 @@ void one_blink()
                                             led1_reserve=true;
                                             led2_reserve=true;
                                             leds_crush=false;
+
+                                            led1_work=false;
+                                            led2_work=false;
                                         }
                                     }
             }
@@ -532,6 +544,30 @@ void check_power(void *pvParameters)
     }
 }
 
+void check_time(void *pvParameters)
+{
+    TickType_t wake_check_time = 0;
+    while (1)
+    {  
+        if(task_check_power_ready)
+        {
+            if(led1_work)
+            {
+                led1_work_time++;
+                if(led1_work_time>hours)
+                led1_work_time=0;
+            }      
+            if (led2_work)
+            {
+                led2_work_time++;
+                if(led2_work_time>hours)
+                led2_work_time=0;
+            }
+        }
+        vTaskDelayUntil ( &wake_check_time, pdMS_TO_TICKS (1000 )) ;
+    }
+}
+
 void app_main()
 {
     // Инициализация NVS
@@ -586,12 +622,17 @@ void app_main()
 
     xTaskCreate(check_leds, "check_leds", 4096, NULL, 5, NULL);
 
+    xTaskCreate(check_time, "check_time", 4096, NULL, 5, NULL);
+
     xTaskCreate(blink_loop, "blink_loop", 4096, NULL, 5, NULL);
+
+    
 
     xTaskCreate(one_blink,"one blink",4096, NULL, 5, NULL);
 
     xTaskCreate(check_power, "check_power", 4096, NULL, 7, NULL);
 
     
+
 } 
 
