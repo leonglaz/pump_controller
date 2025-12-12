@@ -17,143 +17,84 @@
 #include <lwip/sys.h>
 #include <lwip/api.h>
 #include <lwip/netdb.h>
+#include <time.h>
 #include "driver/uart.h"
 
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
-/* static const char *TAG = "ESP32_WebServer";
+static const char *TAG = "Pump_Conroller";
+
+
 
 // Конфигурация WiFi
 #define EXAMPLE_ESP_WIFI_SSID "ESP32_UART_Server"
 #define EXAMPLE_ESP_WIFI_PASS "12345678"
 #define EXAMPLE_ESP_WIFI_CHANNEL 1
-#define EXAMPLE_MAX_STA_CONN 5
+#define EXAMPLE_MAX_STA_CONN 4
 
 #define GPIO_LED1 5
 #define GPIO_LED2 15
 #define GPIO_ERROR1_IN  19
 #define GPIO_ERROR2_IN  21
 #define GPIO_PLUS_ERRORS 22
+#define GPIO_BUTTON_POWER 17
 
-int led_state1 = 0;
-int led_state2 = 0;
-
-bool led1_enable=false;
-bool led2_enable=false;
-
-bool blink_loop_enable=0;
-uint16_t blink_time_stop=1000;
-
+// Глобальные переменные
+static int led_state1 = 0;
+static int led_state2 = 0;
+static bool led1_enable = false;
+static bool led2_enable = false;
+static uint8_t hours = 10;
 bool semafore=true;
+bool task_check_power_ready=false;
 
-SemaphoreHandle_t semaphore_loop;
-SemaphoreHandle_t semaphore_one;
-
-
-bool web_led1=true;
-bool web_led2=true;
-uint8_t hours=0;
-// HTML шаблоны
-char html_template[] = 
-"<!DOCTYPE html>"
-"<html>"
-"    <head>"
-"    <meta charset=\"UTF-8\">"
-"    <title>ESP32 UART Web Server</title>"
-"    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-"    <style>"
- "       html {"
- "        font-family: Arial;"
- "        display: inline-block;"
- "         margin: 0px auto;"
-"          text-align: center;"
- "       }"
-"        h1 {"
-"          color: #070812;"
-"          padding: 2vh;"
-"        }"
-"        .button {"
-"          background-color: #b30000;"
-"        }"
-"        .button2 {"
-"          background-color: #364cf4;"
-"        }"
-"        .button3 {"
-"          background-color:rgb(8, 210, 15);"
-"       }"
-"        .button4 {"
-"          background-color:rgb(255, 72, 0);"
-"        }"
-"        .content {"
-"         padding: 50px;"
-"        }"
-"        .card-grid {"
-"          max-width: 800px;"
- "         margin: 0 auto;"
-"          display: grid;"
-"          grid-gap: 2rem;"
-"          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));"
-"        }"
-"        .card {"
-"          background-color: white;"
-"          box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5);"
-"          padding: 20px;"
-"        }"
-"        .card-title {"
-"          font-size: 1.2rem;"
-"          font-weight: bold;"
-"          color: #034078;"
- "       }"
- "   </style>"
-" </head>"
-" <body>"
-"  <h1>ESP32 Web Server</h1>"
-"  <div class=\"content\">"
-"   <div class=\"card-grid\">"
-"      <div class=\"card\">"
-"       <h2>Состояние LED1: <strong>%s</strong></h2>"
-"          <a href=\"/ledon\"><button class=\"button button3\">ВКЛ</button></a>"
-"           <a href=\"/ledoff\"><button class=\"button button4\">ВЫКЛ</button></a>"
-"      </div>"
-"      <div class=\"card\">"
-"        <h2>Состояние LED2: <strong>%s</strong></h2>"
-"        <p>"
-"          <a href=\"/ledon2\"><button class=\"button\">ВКЛ</button></a>"
-"          <a href=\"/ledoff2\"><button class=\"button button2\">ВЫКЛ</button></a>"
-"        </p>"
-"      </div>"
-"       <div class=\"card\">"
-"        <h2>Кол-во часов смены насосов: <strong>%s</strong></h2>"
-"        <p>"
-"        <form action='/save' method='POST'>"
-"         Текст: <input type='text' name='mytext' value='%s'><br>"
-"       <input type='submit' value='Отправить'>"
-"       </form>"
-"       </p> "
-"       </div>"
-"    </div>"
-"   </div>"
-"</body>"
-"</html>";
+uint16_t led1_work_time=1;
+uint16_t led2_work_time=1;
 
 
+bool blink_loop_work=false;
+// HTML шаблон - минимальный
+static const char html_template[] = 
+"<!DOCTYPE html><html><head>"
+"<meta charset=UTF-8><title>ESP32</title><meta name=viewport content='width=device-width,initial-scale=1'>"
+"<style>"
+"body{font-family:Arial;text-align:center;margin:20px}"
+".btn{padding:10px 20px;margin:5px;border:none;border-radius:4px;color:white;text-decoration:none;display:inline-block}"
+".on{background:#0a0}"
+".off{background:#a00}"
+".led2{background:#00a}"
+"</style>"
+"</head>"
+"<body>"
+"<h1>ESP32 Web Server</h1>"
+"<div><h2>LED1: <strong>%s</strong></h2>"
+"<a href=/ledon class='btn on'>ВКЛ</a>"
+"<a href=/ledoff class='btn off'>ВЫКЛ</a></div>"
+"<div><h2>LED2: <strong>%s</strong></h2>"
+"<a href=/ledon2 class='btn led2'>ВКЛ</a>"
+"<a href=/ledoff2 class='btn off'>ВЫКЛ</a></div>"
+"<div><h2>Часы: <strong>%d</strong></h2>"
+"<form method='POST' action='/'>"
+"<input type='number' name='hours' min='1' max='100' value='%d'>"
+"<input type='submit' class='btn off' value='Сохранить'>"
+"</form></div>"
+"</body></html>";
 
 // Обработчик WiFi событий
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                                    int32_t event_id, void* event_data)
+                               int32_t event_id, void* event_data)
 {
     if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-        ESP_LOGI(TAG, "Подключилось устройство: "MACSTR", AID=%d",
-                 MAC2STR(event->mac), event->aid);
+        ESP_LOGI(TAG, "Устройство подключено");
     } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-        ESP_LOGI(TAG, "Отключилось устройство: "MACSTR", AID=%d",
-                 MAC2STR(event->mac), event->aid);
+        ESP_LOGI(TAG, "Устройство отключено");
     }
 }
 
-// Инициализация WiFi в режиме точки доступа
-void wifi_init_softap(void)
+// Инициализация WiFi
+static void wifi_init_softap(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -171,14 +112,10 @@ void wifi_init_softap(void)
     wifi_config_t wifi_config = {
         .ap = {
             .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .ssid_len = strlen(EXAMPLE_ESP_WIFI_SSID),
             .channel = EXAMPLE_ESP_WIFI_CHANNEL,
             .password = EXAMPLE_ESP_WIFI_PASS,
             .max_connection = EXAMPLE_MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA2_PSK,
-            .pmf_cfg = {
-                .required = true,
-            },
+            .authmode = WIFI_AUTH_WPA2_PSK
         },
     };
 
@@ -190,204 +127,202 @@ void wifi_init_softap(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "Точка доступа запущена. SSID:%s, Канал:%d",
-             EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_CHANNEL);
+    ESP_LOGI(TAG, "WiFi AP запущен: %s", EXAMPLE_ESP_WIFI_SSID);
 }
 
-// Генерация HTML страницы
-esp_err_t send_web_page(httpd_req_t *req)
+// Обработчик POST запросов - ИСПРАВЛЕННЫЙ
+static esp_err_t post_handler(httpd_req_t *req)
 {
-    char html_response[2048];
-    const char* led_status1 = (led_state1 == 1) ? "ВКЛ" : "ВЫКЛ";
-    const char* led_status2 = (led_state2 == 1) ? "ВКЛ" : "ВЫКЛ";
-    char hours_label[10];
-    sprintf(hours_label, "%d", hours);
-    // Формируем HTML страницу с текущими данными
-    snprintf(html_response, sizeof(html_response), html_template, led_status1, led_status2, hours_label);
     
-    return httpd_resp_send(req, html_response, HTTPD_RESP_USE_STRLEN);
-}
-
-// Обработчик главной страницы
-esp_err_t get_req_handler(httpd_req_t *req)
-{
-    return send_web_page(req);
-}
-
-// Обработчик обновления страницы
-esp_err_t refresh_handler(httpd_req_t *req)
-{
-    // Просто возвращаем обновленную страницу
-    return send_web_page(req);
-}
-
-// Обработчик включения LED
-esp_err_t led_on_handler(httpd_req_t *req)
-{
-    web_led1=true;
-    led1_enable = true;
-    ESP_LOGI(TAG, "LED1 включен");
-    return send_web_page(req);
-}
-
-// Обработчик выключения LED
-esp_err_t led_off_handler(httpd_req_t *req)
-{
-    web_led1=false;
-    led1_enable = false;
-    ESP_LOGI(TAG, "LED1 выключен");
-    return send_web_page(req);
-}
-
-esp_err_t led_on_handler2(httpd_req_t *req)
-{
-    web_led2=true;
-    led1_enable = true;
-    ESP_LOGI(TAG, "LED2 включен");
-    return send_web_page(req);
-}
-
-// Обработчик выключения LED
-esp_err_t led_off_handler2(httpd_req_t *req)
-{
-    web_led2=false;
-    led1_enable = false;
-    ESP_LOGI(TAG, "LED2 выключен");
-    return send_web_page(req);
-}
-
-esp_err_t set_hours_post_handler(httpd_req_t *req)
-{
-    ESP_LOGI(TAG, "POST запрос на установку часов");
+    char buf[64];
+    int ret;
+    int remaining = req->content_len;
+    int total_read = 0;
     
-    char buf[100];
-    int ret, remaining = req->content_len;
-    
-    // Читаем тело POST запроса (данные формы)
-    size_t recv_size = (remaining < sizeof(buf) - 1) ? remaining : sizeof(buf) - 1;
-    if ((ret = httpd_req_recv(req, buf, recv_size)) <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
+    // Читаем тело POST запроса
+    while (remaining > 0 && total_read < sizeof(buf) - 1) {
+        ret = httpd_req_recv(req, buf + total_read, 
+                            MIN(remaining, sizeof(buf) - total_read - 1));
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                continue;
+            }
+            break;
         }
-        return ESP_FAIL;
+        total_read += ret;
+        remaining -= ret;
     }
-    buf[ret] = '\0';
+    buf[total_read] = '\0';
     
-    ESP_LOGI(TAG, "Получены данные формы: %s", buf);
-    
-    // Парсим параметры формы (hours=значение)
-    char param[32];
-    if (httpd_query_key_value(buf, "hours", param, sizeof(param)) == ESP_OK) {
-        // Преобразуем строку в число
-        int new_hours = atoi(param);
-        
-        // Проверяем валидность
-        if (new_hours >= 1 && new_hours <= 24) {
-            hours= new_hours;
-            ESP_LOGI(TAG, "Установлено новое значение: %d часов", hours);
+    ESP_LOGI(TAG, "Получено POST: %s", buf);
+    int new_hours=1;
+
+    char *hours_start = strstr(buf, "hours=");
+    if (hours_start) {
+        hours_start += 6; // Пропускаем "hours="
+        new_hours = atoi(hours_start);
+        if (new_hours >= 1) {
             
-            // Редирект на главную с параметром успеха
-            httpd_resp_set_status(req, "303 See Other");
-            httpd_resp_set_hdr(req, "Location", "/?success=1");
-            httpd_resp_send(req, NULL, 0);
             
-            return ESP_OK;
-        } else {
-            ESP_LOGE(TAG, "Некорректное значение часов: %d", new_hours);
+            hours = new_hours;
+            ESP_LOGI(TAG, "Новое время смены насосов: %d", hours);
         }
-    } else {
-        ESP_LOGE(TAG, "Не удалось извлечь параметр 'hours'");
     }
+
     
-    // Если ошибка - редирект без параметра успеха
+    // Редирект на главную
     httpd_resp_set_status(req, "303 See Other");
     httpd_resp_set_hdr(req, "Location", "/");
     httpd_resp_send(req, NULL, 0);
-    
     return ESP_OK;
 }
 
-// Настройка URI handlers
-httpd_uri_t uri_get = {
+// Обработчик GET запросов (главная страница)
+static esp_err_t get_handler(httpd_req_t *req)
+{
+    char response[1024];
+    const char* led1_status = led_state1 ? "ВКЛ" : "ВЫКЛ";
+    const char* led2_status = led_state2 ? "ВКЛ" : "ВЫКЛ";
+    
+    int len = snprintf(response, sizeof(response), html_template, 
+                      led1_status, led2_status, hours, hours);
+    
+    if (len > 0 && len < sizeof(response)) {
+        httpd_resp_set_type(req, "text/html");
+        return httpd_resp_send(req, response, len);
+    }
+    
+    return ESP_FAIL;
+}
+
+// Функция редиректа
+static esp_err_t redirect_to_home(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+// Обработчики LED
+static esp_err_t led_on_handler(httpd_req_t *req)
+{
+    led_state1 = 1;
+    led1_enable = true;
+    return redirect_to_home(req);
+}
+
+static esp_err_t led_off_handler(httpd_req_t *req)
+{
+    led_state1 = 0;
+    led1_enable = false;
+    return redirect_to_home(req);
+}
+
+static esp_err_t led_on_handler2(httpd_req_t *req)
+{
+    led_state2 = 1;
+    led2_enable = true;
+    return redirect_to_home(req);
+}
+
+static esp_err_t led_off_handler2(httpd_req_t *req)
+{
+    led_state2 = 0;
+    led2_enable = false;
+    return redirect_to_home(req);
+}
+
+// URI handlers
+static const httpd_uri_t root = {
     .uri = "/",
     .method = HTTP_GET,
-    .handler = get_req_handler,
+    .handler = get_handler,
     .user_ctx = NULL
 };
 
-httpd_uri_t uri_refresh = {
-    .uri = "/refresh",
-    .method = HTTP_GET,
-    .handler = refresh_handler,
+static const httpd_uri_t post = {
+    .uri = "/",
+    .method = HTTP_POST,
+    .handler = post_handler,
     .user_ctx = NULL
-    
 };
 
-httpd_uri_t uri_ledon = {
+static const httpd_uri_t ledon = {
     .uri = "/ledon",
     .method = HTTP_GET,
     .handler = led_on_handler,
     .user_ctx = NULL
 };
 
-httpd_uri_t uri_ledoff = {
+static const httpd_uri_t ledoff = {
     .uri = "/ledoff",
     .method = HTTP_GET,
     .handler = led_off_handler,
     .user_ctx = NULL
 };
 
-httpd_uri_t uri_ledon2 = {
+static const httpd_uri_t ledon2 = {
     .uri = "/ledon2",
     .method = HTTP_GET,
     .handler = led_on_handler2,
     .user_ctx = NULL
 };
 
-httpd_uri_t uri_ledoff2 = {
+static const httpd_uri_t ledoff2 = {
     .uri = "/ledoff2",
     .method = HTTP_GET,
     .handler = led_off_handler2,
     .user_ctx = NULL
 };
 
-httpd_uri_t uri_hours = {
-    .uri = "/send",
-    .method    = HTTP_POST,
-    .handler   = set_hours_post_handler,
-    .user_ctx  = NULL
-};
-
-
-// Запуск HTTP сервера
-httpd_handle_t setup_server(void)
+// Инициализация HTTP сервера
+static void start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.stack_size = 8192;
+    config.task_priority = tskIDLE_PRIORITY + 3;
+    config.max_uri_handlers = 8;
+    config.lru_purge_enable = true;
+    config.recv_wait_timeout = 10;
+    config.send_wait_timeout = 10;
+    
+    ESP_LOGI(TAG, "Запуск HTTP сервера на порту: %d", config.server_port);
+    
     httpd_handle_t server = NULL;
-
     if (httpd_start(&server, &config) == ESP_OK) {
-        httpd_register_uri_handler(server, &uri_get);
-        httpd_register_uri_handler(server, &uri_refresh);
-        httpd_register_uri_handler(server, &uri_ledon);
-        httpd_register_uri_handler(server, &uri_ledoff);
-        httpd_register_uri_handler(server, &uri_ledon2);
-        httpd_register_uri_handler(server, &uri_ledoff2);
-        httpd_register_uri_handler(server, &uri_hours);
-        ESP_LOGI(TAG, "HTTP сервер запущен");
+        // Регистрация обработчиков
+        httpd_register_uri_handler(server, &root);
+        httpd_register_uri_handler(server, &post);
+        httpd_register_uri_handler(server, &ledon);
+        httpd_register_uri_handler(server, &ledoff);
+        httpd_register_uri_handler(server, &ledon2);
+        httpd_register_uri_handler(server, &ledoff2);
+        
+        ESP_LOGI(TAG, "HTTP сервер успешно запущен");
     } else {
         ESP_LOGE(TAG, "Ошибка запуска HTTP сервера");
     }
-
-    return server;
 }
 
 
+bool led1_work;
+bool led2_work;
+
 void blink_loop()
 {
+    TickType_t prevWakeup = 0;
+    uint16_t i=0;
+    uint16_t work_time=0;
 
-     while (1)
+/*     task_check_power_ready=true;
+    semafore=true;
+    led_state1=true; */
+    
+    while (1)
     {   
-
+        if(task_check_power_ready)
+        {
             if(semafore)
             {
                 
@@ -395,96 +330,249 @@ void blink_loop()
                 {
                     gpio_set_level(GPIO_LED1, 1);
                     gpio_set_level(GPIO_LED2, 0);
+                    ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
+                    led1_work=true;
+                    led1_work=true;
+                    led2_work=false;
                 }else    
                         {   
                             gpio_set_level(GPIO_LED1, 0);
                             gpio_set_level(GPIO_LED2, 1);
+                            ESP_LOGI(TAG, "LED2 горит %d, time2 %d", i,  led2_work_time);
+                            led1_work=false;
+                            led2_work=true;
                         }
-                led_state1=!led_state1;
+                
+                if(led1_work)
+                work_time=led1_work_time;
+                if (led2_work)
+                work_time=led2_work_time;
+
+                if  (work_time>=(hours))            
+                {
+                    led_state1=!led_state1;
+                    i=0;
+                }
+                i++;
+                vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( 1000 )) ;
             }
-        vTaskDelay(blink_time_stop/ portTICK_PERIOD_MS);
+        }
+        vTaskDelay(10/ portTICK_PERIOD_MS);
     }
     
 }
+bool led1_reserve;
+bool led2_reserve;
+bool leds_crush;
 
 void one_blink()
 {
+    led1_reserve=true;
+    led2_reserve=true;
+    leds_crush=true;
 
     while (1)
     {   
-
+        if(task_check_power_ready)
+        {
             if(!semafore)
             {
+            
                 if(led1_enable)
                 {
-                    gpio_set_level(GPIO_LED1, 1);
-                    gpio_set_level(GPIO_LED2, 0);
+                    if(led1_reserve)
+                    {
+                        gpio_set_level(GPIO_LED1, 1);
+                        gpio_set_level(GPIO_LED2, 0);
+                        ESP_LOGI(TAG, "LED1 горит резерв");
+                        led1_reserve=false;
+                        led2_reserve=true;
+                        leds_crush=true;
+
+                        led1_work=true;
+                        led2_work=false;
+                    }
+                    
                 }else if(led2_enable)
                             {
-                                gpio_set_level(GPIO_LED1, 0);
-                                gpio_set_level(GPIO_LED2, 1);
+                                if(led2_reserve)
+                                {
+                                    gpio_set_level(GPIO_LED1, 0);
+                                    gpio_set_level(GPIO_LED2, 1);
+                                    ESP_LOGI(TAG, "LED2 горит резерв");
+                                    led1_reserve=true;
+                                    led2_reserve=false;
+                                    leds_crush=true;
+                                    led1_work=false;
+                                    led2_work=true;
+                                }
                             } else  {
-                                        gpio_set_level(GPIO_LED1, 0);
-                                        gpio_set_level(GPIO_LED2, 0);
+                                        if(leds_crush)
+                                        {
+                                            gpio_set_level(GPIO_LED1, 0);
+                                            gpio_set_level(GPIO_LED2, 0);
+                                            ESP_LOGI(TAG, "сломаны");
+                                            led1_reserve=true;
+                                            led2_reserve=true;
+                                            leds_crush=false;
+
+                                            led1_work=false;
+                                            led2_work=false;
+                                        }
                                     }
-
             }
-        
-        
-
+        //ESP_LOGI(TAG, "Задача blink one работает");
+        }
         vTaskDelay(10/ portTICK_PERIOD_MS);
-        
-
-                
-        
     }
     
 }
 
+bool normal_work;
+
 void check_leds()
 {
+    normal_work=true;
+    
     while (1)
     {   
-        
-        if(!gpio_get_level(GPIO_ERROR1_IN))
-        {
-            
-            led1_enable=true;
-            //gpio_set_level(GPIO_LED1, 1);
-        }
-        else 
+        if(task_check_power_ready)
+        {   
+            if(gpio_get_level(GPIO_ERROR1_IN))
+            {
+                vTaskDelay(50);
+            }
+            if(!gpio_get_level(GPIO_ERROR1_IN))
+            {
+                
+                led1_enable=true;
+                //gpio_set_level(GPIO_LED1, 1);
+            }
+            else 
                 {
                     led1_enable=false;
                     //gpio_set_level(GPIO_LED1, 0);
                 }
-
-        if(!gpio_get_level(GPIO_ERROR2_IN))
-        {
-            led2_enable=true;
-            //gpio_set_level(GPIO_LED2, 0);
-        }
-        else    {
-                    led2_enable=false;
-                    //gpio_set_level(GPIO_LED2, 1);
-                }
-
-        
-        if(led1_enable&&led2_enable)
-        {
-            semafore=true;
-        
-        }
-        else 
+            if(gpio_get_level(GPIO_ERROR2_IN))
             {
-                semafore=false;
-    
+                vTaskDelay(50);
             }
 
+            if(!gpio_get_level(GPIO_ERROR2_IN))
+            {
+                led2_enable=true;
+                //gpio_set_level(GPIO_LED2, 0);
+            }
+            else    {
+                    led2_enable=false;
+                    //gpio_set_level(GPIO_LED2, 1);
+                    }   
 
+        
+            if(led1_enable&&led2_enable)
+            {
+                if(normal_work)
+                {
+                    ESP_LOGI(TAG, "Разрешена смена светодиодов");
+                    semafore=true;
+                    normal_work=false;
+                }
+                    
+                
+                
+            }
+            else 
+                {   
+                    if(!normal_work)
+                    {
+                        
+                        ESP_LOGE(TAG, "Запрещена смена светодиодов");
+                        semafore=false;
+                        normal_work=true;
+                    }
+                }
+            //ESP_LOGI(TAG, "Задача check leds работает");
+        } 
+        
 
-        vTaskDelay(10/ portTICK_PERIOD_MS);
+        
+
+        vTaskDelay(100/ portTICK_PERIOD_MS);
     }
     
+}
+
+static bool tasks_suspended = true;
+
+void check_power(void *pvParameters)
+{
+    
+
+    gpio_set_level(GPIO_LED1, 0);
+    gpio_set_level(GPIO_LED2, 0);
+
+    tasks_suspended = true;
+    
+    while (1)
+    {   
+
+        if(!gpio_get_level(GPIO_ERROR1_IN))
+        {
+            vTaskDelay(50);
+        }
+
+        if(gpio_get_level(GPIO_BUTTON_POWER))
+        {
+            if(tasks_suspended)
+            {
+             
+                task_check_power_ready=true;
+                ESP_LOGI(TAG, "контроллер включен");
+                tasks_suspended=false;
+                
+            }
+                
+            
+        }
+        else 
+        {
+            if(!tasks_suspended)
+            {
+                task_check_power_ready=false;
+                gpio_set_level(GPIO_LED1, 0);
+                gpio_set_level(GPIO_LED2, 0);
+                ESP_LOGE(TAG, "контроллер выключен");
+                blink_loop_work=false;
+                tasks_suspended=true;
+            }
+        }
+        //ESP_LOGI(TAG, "Задача check power работает");
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+}
+
+void check_time(void *pvParameters)
+{
+    TickType_t wake_check_time = 0;
+    while (1)
+    {  
+        if(task_check_power_ready)
+        {
+            if(led1_work)
+            {
+                led1_work_time++;
+                if(led1_work_time>hours)
+                led1_work_time=0;
+            }      
+            if (led2_work)
+            {
+                led2_work_time++;
+                if(led2_work_time>hours)
+                led2_work_time=0;
+            }
+        }
+        vTaskDelayUntil ( &wake_check_time, pdMS_TO_TICKS (1000 )) ;
+    }
 }
 
 void app_main()
@@ -519,6 +607,10 @@ void app_main()
     gpio_set_direction(GPIO_PLUS_ERRORS, GPIO_MODE_OUTPUT);
     gpio_set_level(GPIO_PLUS_ERRORS, 1);
 
+    gpio_reset_pin(GPIO_BUTTON_POWER);
+    gpio_set_direction(GPIO_BUTTON_POWER, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_BUTTON_POWER, GPIO_FLOATING);
+
 
     
 
@@ -528,170 +620,26 @@ void app_main()
 
     
     // Запуск HTTP сервера
-    setup_server();
-
-    xTaskCreate(check_leds, "check_leds", 4096, NULL, 7, NULL);
-
-    xTaskCreate(blink_loop, "blink_loop", 4096, NULL, 5, NULL);
-
-    xTaskCreate(one_blink,"one blink",4096, NULL, 5, NULL);
-    
+    start_webserver();
 
     ESP_LOGI(TAG, "Система запущена. Подключитесь к WiFi: %s", EXAMPLE_ESP_WIFI_SSID);
     ESP_LOGI(TAG, "Откройте браузер и перейдите по адресу: http://192.168.4.1");
+
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+
+    xTaskCreate(check_leds, "check_leds", 4096, NULL, 5, NULL);
+
+    xTaskCreate(check_time, "check_time", 4096, NULL, 5, NULL);
+
+    xTaskCreate(blink_loop, "blink_loop", 4096, NULL, 5, NULL);
+
+    
+
+    xTaskCreate(one_blink,"one blink",4096, NULL, 5, NULL);
+
+    xTaskCreate(check_power, "check_power", 4096, NULL, 7, NULL);
+
+    
+
 } 
-*/
 
-static const char *TAG = "FORM";
-static char received_text[64] = "текст";
-
-// HTML главной страницы
-static const char* MAIN_PAGE = 
-"<!DOCTYPE html>"
-"<html><head><meta charset='UTF-8'></head><body>"
-"<h1>Форма отправки</h1>"
-"<form action='/send' method='POST'>"
-"<input type='text' name='text' value='%s'>"
-"<input type='submit' value='Отправить'>"
-"</form>"
-"<p>Текущий текст: <b>%s</b></p>"
-"</body></html>";
-
-// Обработчик главной страницы (GET /)
-esp_err_t main_page_handler(httpd_req_t *req)
-{
-    char response[512];
-    snprintf(response, sizeof(response), MAIN_PAGE, received_text, received_text);
-    
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_send(req, response, strlen(response));
-    return ESP_OK;
-}
-
-// Обработчик отправки формы (POST /send)
-esp_err_t send_handler(httpd_req_t *req)
-{
-    char buf[100];
-    int ret = httpd_req_recv(req, buf, sizeof(buf)-1);
-    
-    if (ret > 0) {
-        buf[ret] = '\0';
-        ESP_LOGI(TAG, "Получено: %s", buf);
-        
-        // Извлекаем текст из формы
-        char *text_start = strstr(buf, "text=");
-        if (text_start) {
-            text_start += 5;
-            strncpy(received_text, text_start, sizeof(received_text)-1);
-            received_text[sizeof(received_text)-1] = '\0';
-            
-            // Убираем & если есть
-            char *amp = strchr(received_text, '&');
-            if (amp) *amp = '\0';
-            
-            ESP_LOGI(TAG, "Сохранено: %s", received_text);
-        }
-    }
-    
-    // Редирект на главную
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
-    httpd_resp_send(req, NULL, 0);
-    
-    return ESP_OK;
-}
-
-// Настройка Wi-Fi (правильная инициализация)
-static void wifi_init_softap(void)
-{
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
-    assert(ap_netif);
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    wifi_config_t wifi_config = {
-        .ap = {
-            .ssid = "ESP32-Form",
-            .password = "",
-            .ssid_len = strlen("ESP32-Form"),
-            .channel = 1,
-            .max_connection = 4,
-            .authmode = WIFI_AUTH_OPEN
-        },
-    };
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "Wi-Fi AP запущен: SSID:%s", wifi_config.ap.ssid);
-}
-
-// Запуск веб-сервера
-static httpd_handle_t start_webserver(void)
-{
-    httpd_handle_t server = NULL;
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 12;
-
-    ESP_LOGI(TAG, "Запуск веб-сервера на порту: %d", config.server_port);
-    if (httpd_start(&server, &config) == ESP_OK) {
-        // Главная страница
-        httpd_uri_t main_uri = {
-            .uri = "/",
-            .method = HTTP_GET,
-            .handler = main_page_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &main_uri);
-        
-        // Обработчик отправки
-        httpd_uri_t send_uri = {
-            .uri = "/send",
-            .method = HTTP_POST,
-            .handler = send_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &send_uri);
-        
-        ESP_LOGI(TAG, "Веб-сервер запущен успешно");
-        return server;
-    }
-
-    ESP_LOGI(TAG, "Ошибка запуска веб-сервера");
-    return NULL;
-}
-
-void app_main(void)
-{
-    // Инициализация NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    ESP_LOGI(TAG, "===== Запуск ESP32 Форма =====");
-    
-    // Инициализация Wi-Fi (ОДИН РАЗ!)
-    wifi_init_softap();
-    
-    // Запуск веб-сервера
-    start_webserver();
-    
-    // Выводим IP адрес
-    esp_netif_ip_info_t ip_info;
-    esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"), &ip_info);
-    ESP_LOGI(TAG, "IP адрес: " IPSTR, IP2STR(&ip_info.ip));
-    ESP_LOGI(TAG, "Откройте в браузере: http://" IPSTR, IP2STR(&ip_info.ip));
-    
-    // Основной цикл
-    while (1) {
-        ESP_LOGI(TAG, "Текущий текст: %s", received_text);
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
-    }
-}
