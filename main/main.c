@@ -43,7 +43,7 @@ int32_t pump2_work_minutes=0;
 #define GPIO_LED11 14
 #define GPIO_LED12 27
 #define GPIO_LED21 15
-#define GPIO_LED22 22
+#define GPIO_LED22 5
 
 #define GPIO_OVERHEAT1  35
 #define GPIO_OVERHEAT2  34
