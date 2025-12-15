@@ -19,6 +19,8 @@
 #include <lwip/netdb.h>
 #include <time.h>
 #include "driver/uart.h"
+#include "driver_nvs.h"
+
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -26,7 +28,8 @@
 
 static const char *TAG = "Pump_Conroller";
 
-
+int32_t pump1_work_minutes=0;
+int32_t pump2_work_minutes=0;
 
 // Конфигурация WiFi
 #define EXAMPLE_ESP_WIFI_SSID "ESP32_UART_Server"
@@ -34,12 +37,30 @@ static const char *TAG = "Pump_Conroller";
 #define EXAMPLE_ESP_WIFI_CHANNEL 1
 #define EXAMPLE_MAX_STA_CONN 4
 
-#define GPIO_LED1 5
-#define GPIO_LED2 15
-#define GPIO_ERROR1_IN  19
-#define GPIO_ERROR2_IN  21
-#define GPIO_PLUS_ERRORS 22
-#define GPIO_BUTTON_POWER 17
+
+
+
+#define GPIO_LED11 14
+#define GPIO_LED12 27
+#define GPIO_LED21 15
+#define GPIO_LED22 5
+
+#define GPIO_OVERHEAT1  35
+#define GPIO_OVERHEAT2  34
+#define GPIO_VOLTAGE 39
+#define GPIO_BUTTON_POWER 36
+
+#define GPIO_RELAY_CRUSH 13
+#define GPIO_RELAY_1 12
+#define GPIO_RELAY_2 2
+
+#define GPIO_PHASE_11 26
+#define GPIO_PHASE_12 25
+#define GPIO_PHASE_13 33
+
+#define GPIO_PHASE_21 18
+#define GPIO_PHASE_22 19
+#define GPIO_PHASE_23 21
 
 // Глобальные переменные
 static int led_state1 = 0;
@@ -49,6 +70,11 @@ static bool led2_enable = false;
 static uint8_t hours = 10;
 bool semafore=true;
 bool task_check_power_ready=false;
+
+
+bool phase_pump1=false;
+bool phase_pump2=false;
+bool voltage_work=true;
 
 uint16_t led1_work_time=1;
 uint16_t led2_work_time=1;
@@ -315,55 +341,74 @@ void blink_loop()
     uint16_t i=0;
     uint16_t work_time=0;
 
-/*     task_check_power_ready=true;
-    semafore=true;
-    led_state1=true; */
+
     
     while (1)
     {   
         if(task_check_power_ready)
         {
-            if(semafore)
+           
+             if(semafore)
             {
+               
                 
-                if(led_state1)
+           
+                if(voltage_work)
                 {
-                    gpio_set_level(GPIO_LED1, 1);
-                    gpio_set_level(GPIO_LED2, 0);
-                    ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
-                    led1_work=true;
-                    led1_work=true;
-                    led2_work=false;
-                }else    
-                        {   
-                            gpio_set_level(GPIO_LED1, 0);
-                            gpio_set_level(GPIO_LED2, 1);
-                            ESP_LOGI(TAG, "LED2 горит %d, time2 %d", i,  led2_work_time);
-                            led1_work=false;
-                            led2_work=true;
-                        }
-                
-                if(led1_work)
-                work_time=led1_work_time;
-                if (led2_work)
-                work_time=led2_work_time;
+                    if(led_state1)
+                    {
+                        gpio_set_level(GPIO_LED11, 1);
+                        gpio_set_level(GPIO_LED12, 0);
+                        gpio_set_level(GPIO_LED21, 0);
+                        gpio_set_level(GPIO_LED22, 1);
+                        gpio_set_level(GPIO_RELAY_1, 1);
+                        gpio_set_level(GPIO_RELAY_2, 0);
+                        gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                        ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
+                        led1_work=true;
+                        led1_work=true;
+                        led2_work=false;
+                    }else    
+                            {   
+                                gpio_set_level(GPIO_LED11, 0);
+                                gpio_set_level(GPIO_LED12, 1);
+                                gpio_set_level(GPIO_LED21, 1);
+                                gpio_set_level(GPIO_LED22, 0);
+                                gpio_set_level(GPIO_RELAY_1, 0);
+                                gpio_set_level(GPIO_RELAY_2, 1);
+                                gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                                ESP_LOGI(TAG, "LED2 горит %d, time2 %d", i,  led2_work_time);
+                                led1_work=false;
+                                led2_work=true;
+                            }
+                    
+                    if(led1_work)
+                    work_time=led1_work_time;
+                    if (led2_work)
+                    work_time=led2_work_time;
 
-                if  (work_time>=(hours))            
-                {
-                    led_state1=!led_state1;
-                    i=0;
+                    if  (work_time>=(hours))            
+                    {
+                        led_state1=!led_state1;
+                        i=0;
+                    }
+                    i++;
+                    vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( 1000 )) ;
                 }
-                i++;
-                vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( 1000 )) ;
-            }
+               
+            } 
         }
-        vTaskDelay(10/ portTICK_PERIOD_MS);
+        vTaskDelay(500/ portTICK_PERIOD_MS);
     }
     
 }
 bool led1_reserve;
 bool led2_reserve;
 bool leds_crush;
+
+bool repeat_led1=true;
+bool repeat_led2=true;
+bool repeat_crush=true;
 
 void one_blink()
 {
@@ -376,128 +421,232 @@ void one_blink()
         if(task_check_power_ready)
         {
             if(!semafore)
-            {
-            
-                if(led1_enable)
-                {
-                    if(led1_reserve)
-                    {
-                        gpio_set_level(GPIO_LED1, 1);
-                        gpio_set_level(GPIO_LED2, 0);
-                        ESP_LOGI(TAG, "LED1 горит резерв");
-                        led1_reserve=false;
-                        led2_reserve=true;
-                        leds_crush=true;
+            {   
 
-                        led1_work=true;
-                        led2_work=false;
-                    }
                     
-                }else if(led2_enable)
-                            {
-                                if(led2_reserve)
-                                {
-                                    gpio_set_level(GPIO_LED1, 0);
-                                    gpio_set_level(GPIO_LED2, 1);
-                                    ESP_LOGI(TAG, "LED2 горит резерв");
-                                    led1_reserve=true;
-                                    led2_reserve=false;
-                                    leds_crush=true;
-                                    led1_work=false;
-                                    led2_work=true;
-                                }
-                            } else  {
-                                        if(leds_crush)
-                                        {
-                                            gpio_set_level(GPIO_LED1, 0);
-                                            gpio_set_level(GPIO_LED2, 0);
-                                            ESP_LOGI(TAG, "сломаны");
-                                            led1_reserve=true;
-                                            led2_reserve=true;
-                                            leds_crush=false;
+                    if(led1_enable&&phase_pump1)
+                    {
+                                gpio_set_level(GPIO_LED11, 1);
+                                gpio_set_level(GPIO_LED12, 0);
+                                gpio_set_level(GPIO_RELAY_1, 1);
 
-                                            led1_work=false;
-                                            led2_work=false;
-                                        }
-                                    }
+                                gpio_set_level(GPIO_RELAY_2, 0);
+                                gpio_set_level(GPIO_LED21, 0);
+                                gpio_set_level(GPIO_LED22, 1);
+                                
+                                gpio_set_level(GPIO_RELAY_CRUSH, 0);
+
+                                ESP_LOGI(TAG, "LED1 горит резерв");
+                                led1_reserve=false;
+                                led2_reserve=true;
+                                leds_crush=true;
+
+                                led1_work=true;
+                                led2_work=false;
+
+                                repeat_led1=false;
+                                repeat_led2=true;
+                                repeat_crush=true;
+                        
+                        
+                    
+                    }else if(led2_enable&&phase_pump2)
+                            {   
+                                
+                                   
+                                
+                                        gpio_set_level(GPIO_RELAY_1, 0);
+                                        gpio_set_level(GPIO_LED11, 0);
+                                        gpio_set_level(GPIO_LED12, 1);
+
+                                        gpio_set_level(GPIO_RELAY_2, 1);
+                                        gpio_set_level(GPIO_LED21, 1);
+                                        gpio_set_level(GPIO_LED22, 0);
+
+                                        gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                                        ESP_LOGI(TAG, "LED2 горит резерв");
+                                        led1_reserve=true;
+                                        led2_reserve=false;
+                                        leds_crush=true;
+                                        led1_work=false;
+                                        led2_work=true;
+
+                                        repeat_led1=true;
+                                        repeat_led2=false;
+                                        repeat_crush=true; 
+                       
+                                
+                                
+                            } else  
+                                    {
+
+                                        gpio_set_level(GPIO_RELAY_1, 0);
+                                        gpio_set_level(GPIO_LED11, 0);
+                                        gpio_set_level(GPIO_LED12, 1);
+
+                                        gpio_set_level(GPIO_RELAY_2, 0);
+                                        gpio_set_level(GPIO_LED21, 0);
+                                        gpio_set_level(GPIO_LED22, 1);
+
+                                        gpio_set_level(GPIO_RELAY_CRUSH, 1);
+                                        ESP_LOGI(TAG, "оба насоса сломаны");
+                                        led1_reserve=true;
+                                        led2_reserve=true;
+                                        leds_crush=false;
+
+                                        led1_work=false;
+                                        led2_work=false;
+
+
+                                        
+                                        repeat_led1=true;
+                                        repeat_led2=true;
+                                        repeat_crush=false;
+                                        
+                                    }   
+            
             }
-        //ESP_LOGI(TAG, "Задача blink one работает");
-        }
-        vTaskDelay(10/ portTICK_PERIOD_MS);
+        }     
+
+        vTaskDelay(500/ portTICK_PERIOD_MS);
     }
     
 }
 
-bool normal_work;
+bool repeat_voltage=false;
+bool repeat_overheat1=true;
+bool repeat_overheat2=true;
+bool repeat_check=true;
 
 void check_leds()
 {
-    normal_work=true;
+    
     
     while (1)
     {   
         if(task_check_power_ready)
         {   
-            if(gpio_get_level(GPIO_ERROR1_IN))
-            {
-                vTaskDelay(50);
-            }
-            if(!gpio_get_level(GPIO_ERROR1_IN))
-            {
-                
-                led1_enable=true;
-                //gpio_set_level(GPIO_LED1, 1);
-            }
-            else 
-                {
-                    led1_enable=false;
-                    //gpio_set_level(GPIO_LED1, 0);
-                }
-            if(gpio_get_level(GPIO_ERROR2_IN))
-            {
-                vTaskDelay(50);
-            }
+            
+                        if(!gpio_get_level(GPIO_OVERHEAT1))
+                        {
+                            if(repeat_overheat1)
+                            {
+                                led1_enable=true;
+                                repeat_overheat1=false;
+                            }
+                            
+                            //gpio_set_level(GPIO_LED1, 1);
+                        }
+                        else 
+                            {
+                                if(!repeat_overheat1)
+                                {
+                                    repeat_overheat1=true;
+                                    ESP_LOGE(TAG, "led1 перегрев");
+                                    led1_enable=false;
+                                    
+                                }
+                                
+                                //gpio_set_level(GPIO_LED1, 0);
+                            }
+                        
+                        if(!gpio_get_level(GPIO_OVERHEAT2))
+                        {
+                            if(repeat_overheat2)
+                            {
+                                led2_enable=true;
+                                repeat_overheat2=false;
+                            }
+                            
+                            //gpio_set_level(GPIO_LED1, 1);
+                        }
+                        else 
+                            {
+                                if(!repeat_overheat2)
+                                {
+                                    repeat_overheat2=true;
+                                    ESP_LOGE(TAG, "led2 перегрев");
+                                    led2_enable=false;
+                                    
+                                }
+                                
+                                //gpio_set_level(GPIO_LED1, 0);
+                            }
+                                
+                        if(gpio_get_level(GPIO_VOLTAGE))
+                        {
+                            
+                                repeat_voltage=true;
+                                //ESP_LOGE(TAG, "Напряжение 380");
 
-            if(!gpio_get_level(GPIO_ERROR2_IN))
-            {
-                led2_enable=true;
-                //gpio_set_level(GPIO_LED2, 0);
-            }
-            else    {
-                    led2_enable=false;
-                    //gpio_set_level(GPIO_LED2, 1);
-                    }   
+                                if (gpio_get_level(GPIO_PHASE_11)||gpio_get_level(GPIO_PHASE_12)||gpio_get_level(GPIO_PHASE_13))
+                                {
+                                    
+                                    phase_pump1=false;
+                                    ESP_LOGE(TAG, "Фазы 1 насоса сломаны");
+                                }else phase_pump1=true;
 
-        
-            if(led1_enable&&led2_enable)
+                                if (gpio_get_level(GPIO_PHASE_21)||gpio_get_level(GPIO_PHASE_22)||gpio_get_level(GPIO_PHASE_23))
+                                {
+                                    
+                                    phase_pump2=false;
+                                    ESP_LOGE(TAG, "Фазы 2 насоса сломаны");
+                                }else phase_pump2=true;
+
+                                if(phase_pump1&&phase_pump2)
+                                {
+                                    voltage_work=true;
+                                    //ESP_LOGE(TAG, "voltage_work=true");
+                                }else 
+                                    {
+                                        //ESP_LOGE(TAG, "voltage_work=false");
+                                        voltage_work=false;
+                                    }
+                                    
+                
+
+                        }else   
+                            {
+                                    
+                                repeat_voltage=false;
+                                ESP_LOGE(TAG, "Напряжение 220");
+                                voltage_work=true;
+                                phase_pump1=true;
+                                phase_pump2=true;
+                                    
+                            }
+
+                                
+            
+            
+
+            
+            
+
+            if(led1_enable&&led2_enable&&voltage_work)
             {
-                if(normal_work)
-                {
-                    ESP_LOGI(TAG, "Разрешена смена светодиодов");
-                    semafore=true;
-                    normal_work=false;
-                }
-                    
                 
-                
+                        repeat_check=false;
+                        ESP_LOGI(TAG, "Разрешена смена светодиодов");
+                        semafore=true;
+                   
             }
             else 
                 {   
-                    if(!normal_work)
-                    {
-                        
+                    
+                        repeat_check=true;
                         ESP_LOGE(TAG, "Запрещена смена светодиодов");
                         semafore=false;
-                        normal_work=true;
-                    }
+                       
+                   
                 }
-            //ESP_LOGI(TAG, "Задача check leds работает");
+            //ESP_LOGI(TAG, "Задача check leds работает, питание есть");
         } 
         
 
         
 
-        vTaskDelay(100/ portTICK_PERIOD_MS);
+        vTaskDelay(500/ portTICK_PERIOD_MS);
     }
     
 }
@@ -508,20 +657,22 @@ void check_power(void *pvParameters)
 {
     
 
-    gpio_set_level(GPIO_LED1, 0);
-    gpio_set_level(GPIO_LED2, 0);
+    gpio_set_level(GPIO_LED11, 0);
+    gpio_set_level(GPIO_LED12, 0);
+    gpio_set_level(GPIO_RELAY_1, 0);
+    gpio_set_level(GPIO_RELAY_2, 0);
+    gpio_set_level(GPIO_LED21, 0);
+    gpio_set_level(GPIO_LED22, 0);
+    gpio_set_level(GPIO_RELAY_CRUSH, 0);
 
     tasks_suspended = true;
     
     while (1)
     {   
 
-        if(!gpio_get_level(GPIO_ERROR1_IN))
-        {
-            vTaskDelay(50);
-        }
 
-        if(gpio_get_level(GPIO_BUTTON_POWER))
+
+        if(!gpio_get_level(GPIO_BUTTON_POWER))
         {
             if(tasks_suspended)
             {
@@ -535,19 +686,25 @@ void check_power(void *pvParameters)
             
         }
         else 
-        {
-            if(!tasks_suspended)
             {
-                task_check_power_ready=false;
-                gpio_set_level(GPIO_LED1, 0);
-                gpio_set_level(GPIO_LED2, 0);
-                ESP_LOGE(TAG, "контроллер выключен");
-                blink_loop_work=false;
-                tasks_suspended=true;
+                if(!tasks_suspended)
+                {
+                    task_check_power_ready=false;
+                    gpio_set_level(GPIO_LED11, 0);
+                    gpio_set_level(GPIO_LED12, 0);
+                    gpio_set_level(GPIO_RELAY_1, 0);
+                    gpio_set_level(GPIO_RELAY_2, 0);
+                    gpio_set_level(GPIO_LED21, 0);
+                    gpio_set_level(GPIO_LED22, 0);
+                    gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                    
+                    ESP_LOGE(TAG, "контроллер выключен");
+                    blink_loop_work=false;
+                    tasks_suspended=true;
+                }
             }
-        }
         //ESP_LOGI(TAG, "Задача check power работает");
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
 
@@ -561,14 +718,29 @@ void check_time(void *pvParameters)
             if(led1_work)
             {
                 led1_work_time++;
+                pump1_work_minutes++;
+                /* driver_nvs_write_i32(pump1_work_minutes,"pump1_work_minutes"); */
                 if(led1_work_time>hours)
-                led1_work_time=0;
+                {
+                    led1_work_time=0;
+                    ESP_LOGE(TAG, "часы работы насоса1 %d", pump1_work_minutes);
+                }
+                
+                
             }      
             if (led2_work)
             {
                 led2_work_time++;
+                pump2_work_minutes++;
+                /* driver_nvs_write_i32(pump2_work_minutes,"pump2_work_minutes"); */
                 if(led2_work_time>hours)
-                led2_work_time=0;
+                {
+
+                    led2_work_time=0;
+                    ESP_LOGE(TAG, "часы работы насоса2 %d", pump2_work_minutes);
+                }
+                
+                
             }
         }
         vTaskDelayUntil ( &wake_check_time, pdMS_TO_TICKS (1000 )) ;
@@ -577,39 +749,81 @@ void check_time(void *pvParameters)
 
 void app_main()
 {
-    // Инициализация NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
+    // initialization NVS
+    driver_nvs_init();
+
+    int32_t a=1000;
+    driver_nvs_write_i32(a, "pump1_work_minutes");
+    driver_nvs_write_i32(a, "pump2_work_minutes");
+
+    driver_nvs_read_i32(&pump1_work_minutes, "pump1_work_minutes");
+    driver_nvs_read_i32(&pump2_work_minutes, "pump2_work_minutes");
+
+    ESP_LOGE(TAG, "часы работы насоса1 %d", pump1_work_minutes);
+    ESP_LOGE(TAG, "часы работы насоса2 %d", pump2_work_minutes);
 
 
-    // Инициализация GPIO
-    gpio_reset_pin(GPIO_LED1);
-    gpio_set_direction(GPIO_LED1, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_LED1, 0);
 
-    gpio_reset_pin(GPIO_LED2);
-    gpio_set_direction(GPIO_LED2, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_LED2, 0);
 
-    gpio_reset_pin(GPIO_ERROR1_IN);
-    gpio_set_direction(GPIO_ERROR1_IN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(GPIO_ERROR1_IN, GPIO_FLOATING);
+    // initialization GPIO pump1
+    gpio_reset_pin(GPIO_RELAY_1);
+    gpio_set_direction(GPIO_RELAY_1, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_RELAY_1, 0);
+    gpio_reset_pin(GPIO_LED11);
+    gpio_set_direction(GPIO_LED11, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_LED11, 0);
+    gpio_reset_pin(GPIO_LED12);
+    gpio_set_direction(GPIO_LED12, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_LED12, 0);
+    //gpio_reset_pin(GPIO_OVERHEAT1);
+    gpio_set_direction(GPIO_OVERHEAT1, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_OVERHEAT1, GPIO_FLOATING);
+    gpio_reset_pin(GPIO_PHASE_11);
+    gpio_set_direction(GPIO_PHASE_11, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_PHASE_11, GPIO_FLOATING);
+    gpio_reset_pin(GPIO_PHASE_12);
+    gpio_set_direction(GPIO_PHASE_12, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_PHASE_12, GPIO_FLOATING);
+    gpio_reset_pin(GPIO_PHASE_13);
+    gpio_set_direction(GPIO_PHASE_13, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_PHASE_13, GPIO_FLOATING);
 
-    gpio_reset_pin(GPIO_ERROR2_IN);
-    gpio_set_direction(GPIO_ERROR2_IN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(GPIO_ERROR2_IN, GPIO_FLOATING);
 
-    gpio_reset_pin(GPIO_PLUS_ERRORS);
-    gpio_set_direction(GPIO_PLUS_ERRORS, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_PLUS_ERRORS, 1);
+    
+    // initialization GPIO pump2
+    gpio_reset_pin(GPIO_RELAY_2);
+    gpio_set_direction(GPIO_RELAY_2, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_RELAY_2, 0);
+    gpio_reset_pin(GPIO_LED21);
+    gpio_set_direction(GPIO_LED21, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_LED21, 0);
+    gpio_reset_pin(GPIO_LED22);
+    gpio_set_direction(GPIO_LED22, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_LED22, 0);
+    //gpio_reset_pin(GPIO_OVERHEAT2);
+    gpio_set_direction(GPIO_OVERHEAT2, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_OVERHEAT2, GPIO_FLOATING);
+    gpio_reset_pin(GPIO_PHASE_21);
+    gpio_set_direction(GPIO_PHASE_21, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_PHASE_21, GPIO_FLOATING);
+    gpio_reset_pin(GPIO_PHASE_22);
+    gpio_set_direction(GPIO_PHASE_22, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_PHASE_22, GPIO_FLOATING);
+    gpio_reset_pin(GPIO_PHASE_23);
+    gpio_set_direction(GPIO_PHASE_23, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_PHASE_23, GPIO_FLOATING);
 
-    gpio_reset_pin(GPIO_BUTTON_POWER);
+   
+    // initialization GPIO general
+    //gpio_reset_pin(GPIO_BUTTON_POWER);
     gpio_set_direction(GPIO_BUTTON_POWER, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_BUTTON_POWER, GPIO_FLOATING);
+    gpio_reset_pin(GPIO_RELAY_CRUSH);
+    gpio_set_direction(GPIO_RELAY_CRUSH, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_RELAY_CRUSH, 0);
+    //gpio_reset_pin(GPIO_VOLTAGE);
+    gpio_set_direction(GPIO_VOLTAGE, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_VOLTAGE, GPIO_FLOATING);
 
 
     
@@ -625,15 +839,13 @@ void app_main()
     ESP_LOGI(TAG, "Система запущена. Подключитесь к WiFi: %s", EXAMPLE_ESP_WIFI_SSID);
     ESP_LOGI(TAG, "Откройте браузер и перейдите по адресу: http://192.168.4.1");
 
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     xTaskCreate(check_leds, "check_leds", 4096, NULL, 5, NULL);
 
     xTaskCreate(check_time, "check_time", 4096, NULL, 5, NULL);
 
     xTaskCreate(blink_loop, "blink_loop", 4096, NULL, 5, NULL);
-
-    
 
     xTaskCreate(one_blink,"one blink",4096, NULL, 5, NULL);
 
