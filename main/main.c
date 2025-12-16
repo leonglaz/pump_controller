@@ -28,8 +28,8 @@
 
 static const char *TAG = "Pump_Conroller";
 
-int32_t pump1_work_minutes=0;
-int32_t pump2_work_minutes=0;
+uint32_t pump1_work_minutes=0;
+uint32_t pump2_work_minutes=0;
 
 // Конфигурация WiFi
 #define EXAMPLE_ESP_WIFI_SSID "ESP32_UART_Server"
@@ -63,7 +63,7 @@ int32_t pump2_work_minutes=0;
 #define GPIO_PHASE_23 21
 
 // Глобальные переменные
-static int led_state1 = 0;
+static uint8_t led_state1 = 0;
 static int led_state2 = 0;
 static bool led1_enable = false;
 static bool led2_enable = false;
@@ -77,8 +77,8 @@ bool phase_pump1=false;
 bool phase_pump2=false;
 bool voltage_work=true;
 
-uint16_t led1_work_time=1;
-uint16_t led2_work_time=1;
+uint32_t led1_work_time=0;
+uint32_t led2_work_time=0;
 bool blink_loop_work=false;
 bool do_change=false;
 // HTML шаблон - минимальный
@@ -357,7 +357,11 @@ void blink_loop()
                 {   
                     if  (do_change)            
                     {
-                        led_state1=!led_state1;
+                        if(led_state1)
+                        {
+                            led_state1=0;
+                        }else led_state1=1;
+                        
                         do_change=false;
                         i=0;
                     }
@@ -728,8 +732,10 @@ void check_time(void *pvParameters)
                 
                 if(led1_work_time%period_save_nvs==0)
                 {
-                    driver_nvs_write_i32(pump1_work_minutes,"pump1"); 
-                    ESP_LOGE(TAG, "часы работы насоса1 %d", pump1_work_minutes);
+                    driver_nvs_write_u32(pump1_work_minutes,"pump1"); 
+                    driver_nvs_write_u32(led1_work_time, "change1");
+                    driver_nvs_write_u8(led_state1, "active_pump");
+                    ESP_LOGE(TAG, "насос1: часы работы %d, цикл %d, номер насоса %d", pump1_work_minutes, led1_work_time, led_state1);
                 }
                 if(led1_work_time>=hours)
                 {
@@ -751,8 +757,10 @@ void check_time(void *pvParameters)
                 
                 if (led2_work_time%period_save_nvs==0)
                 {
-                    driver_nvs_write_i32(pump2_work_minutes,"pump2"); 
-                    ESP_LOGE(TAG, "часы работы насоса2 %d", pump2_work_minutes);
+                    driver_nvs_write_u32(pump2_work_minutes,"pump2");
+                    driver_nvs_write_u32(led2_work_time, "change2"); 
+                    driver_nvs_write_u8(led_state1, "active_pump");
+                    ESP_LOGE(TAG, "насос2: часы работы %d, цикл %d, номер насоса %d", pump2_work_minutes, led2_work_time, led_state1);
                 }
 
                 if(led2_work_time>=hours)
@@ -777,18 +785,31 @@ void app_main()
     // initialization NVS
     driver_nvs_init();
 
-/*     int32_t a=1000;
-    driver_nvs_write_i32(a, "pump1");
-    driver_nvs_write_i32(a, "pump2"); */
+/*     uint32_t a=1000;
+    driver_nvs_write_u32(a, "pump1");
+    driver_nvs_write_u32(a, "pump2"); */
 
-    driver_nvs_read_i32(&pump1_work_minutes, "pump1");
-    driver_nvs_read_i32(&pump2_work_minutes, "pump2");
+    driver_nvs_read_u32(&pump1_work_minutes, "pump1");
+    driver_nvs_read_u32(&pump2_work_minutes, "pump2");
 
     ESP_LOGE(TAG, "минуты работы насоса1 %d", pump1_work_minutes);
     ESP_LOGE(TAG, "минуты работы насоса2 %d", pump2_work_minutes);
 
+/*     uint32_t a=0;
+    driver_nvs_write_u32(a, "change1");
+    driver_nvs_write_u32(a, "change2"); */
+    
+    driver_nvs_read_u32(&led1_work_time, "change1");
+    driver_nvs_read_u32(&led2_work_time, "change2");
 
+    ESP_LOGE(TAG, "работа цикла насоса1 %d", led1_work_time);
+    ESP_LOGE(TAG, "работа цикла насоса2 %d", led2_work_time);
 
+/*     uint8_t active_pump=1; 
+    driver_nvs_write_u8(active_pump, "active_pump");*/
+
+    driver_nvs_read_u8(&led_state1, "active_pump");
+    ESP_LOGE(TAG, "работающий насос %d", led_state1);
 
     // initialization GPIO pump1
     gpio_reset_pin(GPIO_RELAY_1);
