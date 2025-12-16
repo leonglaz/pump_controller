@@ -67,7 +67,8 @@ static int led_state1 = 0;
 static int led_state2 = 0;
 static bool led1_enable = false;
 static bool led2_enable = false;
-static uint8_t hours = 10;
+static uint8_t hours = 60;
+static uint8_t period_save_nvs=10;
 bool semafore=true;
 bool task_check_power_ready=false;
 
@@ -724,7 +725,12 @@ void check_time(void *pvParameters)
             {
                 led1_work_time++;
                 pump1_work_minutes++;
-                driver_nvs_write_i32(pump1_work_minutes,"pump1"); 
+                
+                if(led1_work_time%period_save_nvs==0)
+                {
+                    driver_nvs_write_i32(pump1_work_minutes,"pump1"); 
+                    ESP_LOGE(TAG, "часы работы насоса1 %d", pump1_work_minutes);
+                }
                 if(led1_work_time>=hours)
                 {
                     
@@ -733,7 +739,7 @@ void check_time(void *pvParameters)
                         do_change=true;
                     }
                     led1_work_time=0;
-                    ESP_LOGE(TAG, "часы работы насоса1 %d", pump1_work_minutes);
+                    
                 }
                 
                 
@@ -742,7 +748,13 @@ void check_time(void *pvParameters)
             {
                 led2_work_time++;
                 pump2_work_minutes++;
-                driver_nvs_write_i32(pump2_work_minutes,"pump2"); 
+                
+                if (led2_work_time%period_save_nvs==0)
+                {
+                    driver_nvs_write_i32(pump2_work_minutes,"pump2"); 
+                    ESP_LOGE(TAG, "часы работы насоса2 %d", pump2_work_minutes);
+                }
+
                 if(led2_work_time>=hours)
                 {
                     if(!do_change)
@@ -750,7 +762,7 @@ void check_time(void *pvParameters)
                         do_change=true;
                     }
                     led2_work_time=0;
-                    ESP_LOGE(TAG, "часы работы насоса2 %d", pump2_work_minutes);
+                    
                 }
                 
                 
