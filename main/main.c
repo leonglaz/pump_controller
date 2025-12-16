@@ -78,9 +78,8 @@ bool voltage_work=true;
 
 uint16_t led1_work_time=1;
 uint16_t led2_work_time=1;
-
-
 bool blink_loop_work=false;
+bool do_change=false;
 // HTML шаблон - минимальный
 static const char html_template[] = 
 "<!DOCTYPE html><html><head>"
@@ -354,7 +353,15 @@ void blink_loop()
                 
            
                 if(voltage_work)
-                {
+                {   
+                    if  (do_change)            
+                    {
+                        led_state1=!led_state1;
+                        do_change=false;
+                        i=0;
+                    }
+                    
+
                     if(led_state1)
                     {
                         gpio_set_level(GPIO_LED11, 1);
@@ -382,23 +389,18 @@ void blink_loop()
                                 led2_work=true;
                             }
                     
-                    if(led1_work)
+/*                     if(led1_work)
                     work_time=led1_work_time;
                     if (led2_work)
-                    work_time=led2_work_time;
+                    work_time=led2_work_time; */
 
-                    if  (work_time>=(hours))            
-                    {
-                        led_state1=!led_state1;
-                        i=0;
-                    }
                     i++;
                     vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( 1000 )) ;
                 }
                
             } 
         }
-        vTaskDelay(500/ portTICK_PERIOD_MS);
+        vTaskDelay(100/ portTICK_PERIOD_MS);
     }
     
 }
@@ -609,7 +611,7 @@ void check_leds()
                             {
                                     
                                 repeat_voltage=false;
-                                ESP_LOGE(TAG, "Напряжение 220");
+                                //ESP_LOGE(TAG, "Напряжение 220");
                                 voltage_work=true;
                                 phase_pump1=true;
                                 phase_pump2=true;
@@ -627,7 +629,7 @@ void check_leds()
             {
                 
                         repeat_check=false;
-                        ESP_LOGI(TAG, "Разрешена смена светодиодов");
+                        //ESP_LOGI(TAG, "Разрешена смена светодиодов");
                         semafore=true;
                    
             }
@@ -635,7 +637,7 @@ void check_leds()
                 {   
                     
                         repeat_check=true;
-                        ESP_LOGE(TAG, "Запрещена смена светодиодов");
+                        //ESP_LOGE(TAG, "Запрещена смена светодиодов");
                         semafore=false;
                        
                    
@@ -670,7 +672,10 @@ void check_power(void *pvParameters)
     while (1)
     {   
 
-
+        if(!gpio_get_level(GPIO_BUTTON_POWER))
+        {
+            vTaskDelay(50);
+        }
 
         if(!gpio_get_level(GPIO_BUTTON_POWER))
         {
@@ -719,10 +724,11 @@ void check_time(void *pvParameters)
             {
                 led1_work_time++;
                 pump1_work_minutes++;
-                /* driver_nvs_write_i32(pump1_work_minutes,"pump1_work_minutes"); */
-                if(led1_work_time>hours)
+                driver_nvs_write_i32(pump1_work_minutes,"pump1"); 
+                if(led1_work_time>=hours)
                 {
                     led1_work_time=0;
+                    do_change=true;
                     ESP_LOGE(TAG, "часы работы насоса1 %d", pump1_work_minutes);
                 }
                 
@@ -732,10 +738,10 @@ void check_time(void *pvParameters)
             {
                 led2_work_time++;
                 pump2_work_minutes++;
-                /* driver_nvs_write_i32(pump2_work_minutes,"pump2_work_minutes"); */
-                if(led2_work_time>hours)
+                driver_nvs_write_i32(pump2_work_minutes,"pump2"); 
+                if(led2_work_time>=hours)
                 {
-
+                    do_change=true;
                     led2_work_time=0;
                     ESP_LOGE(TAG, "часы работы насоса2 %d", pump2_work_minutes);
                 }
@@ -752,15 +758,15 @@ void app_main()
     // initialization NVS
     driver_nvs_init();
 
-    int32_t a=1000;
-    driver_nvs_write_i32(a, "pump1_work_minutes");
-    driver_nvs_write_i32(a, "pump2_work_minutes");
+/*     int32_t a=1000;
+    driver_nvs_write_i32(a, "pump1");
+    driver_nvs_write_i32(a, "pump2"); */
 
-    driver_nvs_read_i32(&pump1_work_minutes, "pump1_work_minutes");
-    driver_nvs_read_i32(&pump2_work_minutes, "pump2_work_minutes");
+    driver_nvs_read_i32(&pump1_work_minutes, "pump1");
+    driver_nvs_read_i32(&pump2_work_minutes, "pump2");
 
-    ESP_LOGE(TAG, "часы работы насоса1 %d", pump1_work_minutes);
-    ESP_LOGE(TAG, "часы работы насоса2 %d", pump2_work_minutes);
+    ESP_LOGE(TAG, "минуты работы насоса1 %d", pump1_work_minutes);
+    ESP_LOGE(TAG, "минуты работы насоса2 %d", pump2_work_minutes);
 
 
 
