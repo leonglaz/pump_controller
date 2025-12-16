@@ -808,6 +808,7 @@ void timer1_callback(TimerHandle_t pxTimer)
     ESP_LOGW("timer1", "timer1 acidification on ");
     gpio_set_level(GPIO_RELAY_1, 1);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
+    if(led_state1!=1)
     gpio_set_level(GPIO_RELAY_1, 0);
     acidification=false;
 }
@@ -818,6 +819,7 @@ void timer2_callback(TimerHandle_t pxTimer)
     ESP_LOGW("timer2", "timer2 acidification on ");
     gpio_set_level(GPIO_RELAY_2, 1);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
+    if(led_state1!=0)
     gpio_set_level(GPIO_RELAY_2, 0);
     acidification=false;
 }
