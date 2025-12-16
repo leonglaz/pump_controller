@@ -20,7 +20,7 @@
 #include <time.h>
 #include "driver/uart.h"
 #include "driver_nvs.h"
-
+#include "freertos/timers.h"
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -81,7 +81,11 @@ uint32_t led1_work_time=0;
 uint32_t led2_work_time=0;
 bool blink_loop_work=false;
 bool do_change=false;
-// HTML шаблон - минимальный
+
+TimerHandle_t _timer1 = NULL;
+TimerHandle_t _timer2 = NULL;
+bool acidification=false;
+
 static const char html_template[] = 
 "<!DOCTYPE html><html><head>"
 "<meta charset=UTF-8><title>ESP32</title><meta name=viewport content='width=device-width,initial-scale=1'>"
@@ -374,24 +378,32 @@ void blink_loop()
                         gpio_set_level(GPIO_LED21, 0);
                         gpio_set_level(GPIO_LED22, 1);
                         gpio_set_level(GPIO_RELAY_1, 1);
-                        gpio_set_level(GPIO_RELAY_2, 0);
+                        
                         gpio_set_level(GPIO_RELAY_CRUSH, 0);
                         ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
                         led1_work=true;
                         led2_work=false;
+
+                        if(!acidification)
+                        gpio_set_level(GPIO_RELAY_2, 0);
+
                     }else    
                             {   
                                 gpio_set_level(GPIO_LED11, 0);
                                 gpio_set_level(GPIO_LED12, 1);
                                 gpio_set_level(GPIO_LED21, 1);
                                 gpio_set_level(GPIO_LED22, 0);
-                                gpio_set_level(GPIO_RELAY_1, 0);
+                               
                                 gpio_set_level(GPIO_RELAY_2, 1);
                                 gpio_set_level(GPIO_RELAY_CRUSH, 0);
                                 ESP_LOGI(TAG, "LED2 горит %d, time2 %d", i,  led2_work_time);
                                 led1_work=false;
                                 led2_work=true;
+
+                                if(!acidification)
+                                gpio_set_level(GPIO_RELAY_1, 0);
                             }
+                            
                     
 /*                     if(led1_work)
                     work_time=led1_work_time;
@@ -790,6 +802,62 @@ void check_time(void *pvParameters)
 
 
 
+void timer1_callback(TimerHandle_t pxTimer)
+{
+    acidification=true;
+    ESP_LOGW("timer1", "timer1 acidification on ");
+    gpio_set_level(GPIO_RELAY_1, 1);
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    gpio_set_level(GPIO_RELAY_1, 0);
+    acidification=false;
+}
+
+void timer2_callback(TimerHandle_t pxTimer)
+{
+    acidification=true;
+    ESP_LOGW("timer2", "timer2 acidification on ");
+    gpio_set_level(GPIO_RELAY_2, 1);
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    gpio_set_level(GPIO_RELAY_2, 0);
+    acidification=false;
+}
+
+void check_acidification(void *pvParameters)
+{
+    _timer1 = xTimerCreate("Timer1", pdMS_TO_TICKS(10000),  pdTRUE, NULL, timer1_callback);
+    // Запускаем таймер
+    if (xTimerStart( _timer1, 0) == pdPASS) {
+        ESP_LOGI("main", "Software FreeRTOS timer1 stated");
+    };
+
+    _timer2 = xTimerCreate("Timer2", pdMS_TO_TICKS(10000),  pdTRUE, NULL, timer2_callback);
+    // Запускаем таймер
+    if (xTimerStart( _timer2, 0) == pdPASS) {
+        ESP_LOGI("main", "Software FreeRTOS timer2 stated");
+    };
+
+
+    while (1)
+    {  
+        if(task_check_power_ready)
+        {
+            if(led1_work||!led1_enable) 
+                xTimerReset(_timer1, 5);
+
+            if(led2_work||!led2_enable)
+                xTimerReset(_timer2, 5);
+            
+        }else 
+            {
+                xTimerReset(_timer1, 5);
+                xTimerReset(_timer2, 5);
+            }
+
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+}
+
+
 void app_main()
 {
     // initialization NVS
@@ -910,5 +978,6 @@ void app_main()
 
     xTaskCreate(check_time, "check_time", 4096, NULL, 5, NULL);
 
+    xTaskCreate(check_acidification, "check_acidification", 4096, NULL, 5, NULL);
 } 
 
