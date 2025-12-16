@@ -727,8 +727,12 @@ void check_time(void *pvParameters)
                 driver_nvs_write_i32(pump1_work_minutes,"pump1"); 
                 if(led1_work_time>=hours)
                 {
+                    
+                    if(!do_change)
+                    {
+                        do_change=true;
+                    }
                     led1_work_time=0;
-                    do_change=true;
                     ESP_LOGE(TAG, "часы работы насоса1 %d", pump1_work_minutes);
                 }
                 
@@ -741,7 +745,10 @@ void check_time(void *pvParameters)
                 driver_nvs_write_i32(pump2_work_minutes,"pump2"); 
                 if(led2_work_time>=hours)
                 {
-                    do_change=true;
+                    if(!do_change)
+                    {
+                        do_change=true;
+                    }
                     led2_work_time=0;
                     ESP_LOGE(TAG, "часы работы насоса2 %d", pump2_work_minutes);
                 }
