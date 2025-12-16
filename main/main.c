@@ -332,8 +332,8 @@ static void start_webserver(void)
 }
 
 
-bool led1_work;
-bool led2_work;
+bool led1_work=false;
+bool led2_work=false;
 
 void blink_loop()
 {
@@ -377,7 +377,6 @@ void blink_loop()
                         gpio_set_level(GPIO_RELAY_2, 0);
                         gpio_set_level(GPIO_RELAY_CRUSH, 0);
                         ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
-                        led1_work=true;
                         led1_work=true;
                         led2_work=false;
                     }else    
@@ -721,32 +720,38 @@ void check_power(void *pvParameters)
 void check_time(void *pvParameters)
 {
     TickType_t wake_check_time = 0;
+    led1_work=false;
+    led2_work=false;
+
     while (1)
     {  
         if(task_check_power_ready)
         {
             if(led1_work)
             {
+               
                 led1_work_time++;
                 pump1_work_minutes++;
                 
                 if(led1_work_time%period_save_nvs==0)
                 {
+                    if(led1_work_time>=hours)
+                    {
+                        
+                        if(!do_change)
+                        {
+                            do_change=true;
+                        }
+                        led1_work_time=0;
+                        
+                    }
                     driver_nvs_write_u32(pump1_work_minutes,"pump1"); 
                     driver_nvs_write_u32(led1_work_time, "change1");
                     driver_nvs_write_u8(led_state1, "active_pump");
                     ESP_LOGE(TAG, "насос1: часы работы %d, цикл %d, номер насоса %d", pump1_work_minutes, led1_work_time, led_state1);
+                    ESP_LOGE(TAG, "насос2: часы работы %d, цикл %d, номер насоса %d", pump2_work_minutes, led2_work_time, led_state1);
                 }
-                if(led1_work_time>=hours)
-                {
-                    
-                    if(!do_change)
-                    {
-                        do_change=true;
-                    }
-                    led1_work_time=0;
-                    
-                }
+                
                 
                 
             }      
@@ -757,21 +762,24 @@ void check_time(void *pvParameters)
                 
                 if (led2_work_time%period_save_nvs==0)
                 {
+                    if(led2_work_time>=hours)
+                    {
+                        if(!do_change)
+                        {
+                            do_change=true;
+                        }
+                        led2_work_time=0;
+                        
+                    }
                     driver_nvs_write_u32(pump2_work_minutes,"pump2");
                     driver_nvs_write_u32(led2_work_time, "change2"); 
                     driver_nvs_write_u8(led_state1, "active_pump");
+                    ESP_LOGE(TAG, "насос1: часы работы %d, цикл %d, номер насоса %d", pump1_work_minutes, led1_work_time, led_state1);
                     ESP_LOGE(TAG, "насос2: часы работы %d, цикл %d, номер насоса %d", pump2_work_minutes, led2_work_time, led_state1);
-                }
-
-                if(led2_work_time>=hours)
-                {
-                    if(!do_change)
-                    {
-                        do_change=true;
-                    }
-                    led2_work_time=0;
                     
                 }
+
+               
                 
                 
             }
@@ -779,6 +787,8 @@ void check_time(void *pvParameters)
         vTaskDelayUntil ( &wake_check_time, pdMS_TO_TICKS (1000 )) ;
     }
 }
+
+
 
 void app_main()
 {
@@ -889,7 +899,8 @@ void app_main()
 
     xTaskCreate(check_leds, "check_leds", 4096, NULL, 5, NULL);
 
-    xTaskCreate(check_time, "check_time", 4096, NULL, 5, NULL);
+
+    
 
     xTaskCreate(blink_loop, "blink_loop", 4096, NULL, 5, NULL);
 
@@ -897,7 +908,7 @@ void app_main()
 
     xTaskCreate(check_power, "check_power", 4096, NULL, 7, NULL);
 
-    
+    xTaskCreate(check_time, "check_time", 4096, NULL, 5, NULL);
 
 } 
 
