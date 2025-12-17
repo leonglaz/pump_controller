@@ -43,7 +43,7 @@ uint32_t pump2_work_minutes=0;
 #define GPIO_LED11 14
 #define GPIO_LED12 27
 #define GPIO_LED21 15
-#define GPIO_LED22 5
+#define GPIO_LED22 22
 
 #define GPIO_OVERHEAT1  35
 #define GPIO_OVERHEAT2  34
@@ -375,8 +375,8 @@ void blink_loop()
                     {
                         gpio_set_level(GPIO_LED11, 1);
                         gpio_set_level(GPIO_LED12, 0);
-                        gpio_set_level(GPIO_LED21, 0);
-                        gpio_set_level(GPIO_LED22, 1);
+                        
+                        
                         gpio_set_level(GPIO_RELAY_1, 1);
                         
                         gpio_set_level(GPIO_RELAY_CRUSH, 0);
@@ -385,12 +385,16 @@ void blink_loop()
                         led2_work=false;
 
                         if(!acidification)
-                        gpio_set_level(GPIO_RELAY_2, 0);
+                        {   
+                            gpio_set_level(GPIO_RELAY_2, 0);
+                            gpio_set_level(GPIO_LED21, 0);
+                            gpio_set_level(GPIO_LED22, 1);
+                        }
+                        
 
                     }else    
                             {   
-                                gpio_set_level(GPIO_LED11, 0);
-                                gpio_set_level(GPIO_LED12, 1);
+                                
                                 gpio_set_level(GPIO_LED21, 1);
                                 gpio_set_level(GPIO_LED22, 0);
                                
@@ -401,7 +405,12 @@ void blink_loop()
                                 led2_work=true;
 
                                 if(!acidification)
-                                gpio_set_level(GPIO_RELAY_1, 0);
+                                {
+                                    gpio_set_level(GPIO_RELAY_1, 0);
+                                    gpio_set_level(GPIO_LED11, 0);
+                                    gpio_set_level(GPIO_LED12, 1);
+                                }
+                                
                             }
                             
                     
@@ -807,9 +816,16 @@ void timer1_callback(TimerHandle_t pxTimer)
     acidification=true;
     ESP_LOGW("timer1", "timer1 acidification on ");
     gpio_set_level(GPIO_RELAY_1, 1);
+    gpio_set_level(GPIO_LED11, 1);
+    gpio_set_level(GPIO_LED12, 0);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     if(led_state1!=1)
-    gpio_set_level(GPIO_RELAY_1, 0);
+    {
+        gpio_set_level(GPIO_RELAY_1, 0);
+        gpio_set_level(GPIO_LED11, 0);
+        gpio_set_level(GPIO_LED21, 1);
+    }
+    
     acidification=false;
 }
 
@@ -818,9 +834,16 @@ void timer2_callback(TimerHandle_t pxTimer)
     acidification=true;
     ESP_LOGW("timer2", "timer2 acidification on ");
     gpio_set_level(GPIO_RELAY_2, 1);
+    gpio_set_level(GPIO_LED21, 1);
+    gpio_set_level(GPIO_LED22, 0);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     if(led_state1!=0)
-    gpio_set_level(GPIO_RELAY_2, 0);
+    {
+        gpio_set_level(GPIO_RELAY_2, 0);
+        gpio_set_level(GPIO_LED21, 0);
+        gpio_set_level(GPIO_LED22, 1);
+    }
+        
     acidification=false;
 }
 
@@ -843,10 +866,10 @@ void check_acidification(void *pvParameters)
     {  
         if(task_check_power_ready)
         {
-            if(led1_work||!led1_enable) 
+            if(led1_work||!led1_enable||!phase_pump1) 
                 xTimerReset(_timer1, 5);
 
-            if(led2_work||!led2_enable)
+            if(led2_work||!led2_enable||!phase_pump2)
                 xTimerReset(_timer2, 5);
             
         }else 
