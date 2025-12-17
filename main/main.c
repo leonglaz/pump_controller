@@ -67,8 +67,11 @@ static uint8_t led_state1 = 0;
 static int led_state2 = 0;
 static bool led1_enable = false;
 static bool led2_enable = false;
-static uint8_t hours = 60;
-static uint8_t period_save_nvs=10;
+static uint32_t hours = 300;
+static uint32_t period_save_nvs=10*6;
+
+uint32_t timer1_acidification=20;
+uint32_t timer2_acidification=20;
 bool semafore=true;
 bool task_check_power_ready=false;
 
@@ -105,9 +108,9 @@ static const char html_template[] =
 "<div><h2>LED2: <strong>%s</strong></h2>"
 "<a href=/ledon2 class='btn led2'>ВКЛ</a>"
 "<a href=/ledoff2 class='btn off'>ВЫКЛ</a></div>"
-"<div><h2>Часы: <strong>%d</strong></h2>"
+"<div><h2>Часы: <strong>%ld</strong></h2>"
 "<form method='POST' action='/'>"
-"<input type='number' name='hours' min='1' max='100' value='%d'>"
+"<input type='number' name='hours' min='1' max='100' value='%ld'>"
 "<input type='submit' class='btn off' value='Сохранить'>"
 "</form></div>"
 "</body></html>";
@@ -753,12 +756,12 @@ void check_time(void *pvParameters)
                
                 led1_work_time++;
                 pump1_work_minutes++;
-                
+                //ESP_LOGE(TAG, "led1_work_time %d", led1_work_time);
                 if(led1_work_time%period_save_nvs==0)
                 {
                     if(led1_work_time>=hours)
                     {
-                        
+                        ESP_LOGE(TAG, "led1_work_time %d hours %d", led1_work_time, hours);
                         if(!do_change)
                         {
                             do_change=true;
@@ -785,6 +788,7 @@ void check_time(void *pvParameters)
                 {
                     if(led2_work_time>=hours)
                     {
+                        ESP_LOGE(TAG, "led2_work_time %d hours %d", led2_work_time, hours);
                         if(!do_change)
                         {
                             do_change=true;
@@ -849,13 +853,13 @@ void timer2_callback(TimerHandle_t pxTimer)
 
 void check_acidification(void *pvParameters)
 {
-    _timer1 = xTimerCreate("Timer1", pdMS_TO_TICKS(10000),  pdTRUE, NULL, timer1_callback);
+    _timer1 = xTimerCreate("Timer1", pdMS_TO_TICKS(1000*timer1_acidification),  pdTRUE, NULL, timer1_callback);
     // Запускаем таймер
     if (xTimerStart( _timer1, 0) == pdPASS) {
         ESP_LOGI("main", "Software FreeRTOS timer1 stated");
     };
 
-    _timer2 = xTimerCreate("Timer2", pdMS_TO_TICKS(10000),  pdTRUE, NULL, timer2_callback);
+    _timer2 = xTimerCreate("Timer2", pdMS_TO_TICKS(1000*timer2_acidification),  pdTRUE, NULL, timer2_callback);
     // Запускаем таймер
     if (xTimerStart( _timer2, 0) == pdPASS) {
         ESP_LOGI("main", "Software FreeRTOS timer2 stated");
