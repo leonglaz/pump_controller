@@ -82,7 +82,6 @@ bool voltage_work=true;
 
 uint32_t led1_work_time=0;
 uint32_t led2_work_time=0;
-bool blink_loop_work=false;
 bool do_change=false;
 
 TimerHandle_t _timer1 = NULL;
@@ -633,9 +632,6 @@ void check_leds()
                                         //ESP_LOGE(TAG, "voltage_work=false");
                                         voltage_work=false;
                                     }
-                                    
-                
-
                         }else   
                             {
                                     
@@ -646,13 +642,6 @@ void check_leds()
                                 phase_pump2=true;
                                     
                             }
-
-                                
-            
-            
-
-            
-            
 
             if(led1_enable&&led2_enable&&voltage_work)
             {
@@ -722,7 +711,6 @@ void check_power(void *pvParameters)
                     gpio_set_level(GPIO_RELAY_CRUSH, 0);
                     
                     ESP_LOGE(TAG, "контроллер выключен");
-                    blink_loop_work=false;
                     tasks_suspended=true;
                 }
             }
@@ -778,7 +766,7 @@ void check_time(void *pvParameters)
                 {
                     if(led2_work_time>=hours)
                     {
-                        ESP_LOGE(TAG, "led2_work_time %d hours %d", led2_work_time, hours);
+                        
                         if(!do_change)
                         {
                             do_change=true;
