@@ -62,7 +62,10 @@ uint32_t pump2_work_minutes=0;
 #define GPIO_PHASE_22 19
 #define GPIO_PHASE_23 21
 
-// Глобальные переменные
+
+#define FLAG_POWER (1<<0)
+
+EventGroupHandle_t xEventGroup;
 static uint8_t led_state1 = 0;
 static int led_state2 = 0;
 static bool led1_enable = false;
@@ -347,11 +350,12 @@ void blink_loop()
     uint16_t i=0;
     uint16_t work_time=0;
 
-
+    EventBits_t Bits_loop;
     
     while (1)
     {   
-        if(task_check_power_ready)
+        Bits_loop = xEventGroupWaitBits(xEventGroup, FLAG_POWER, pdFALSE,  pdFALSE,    pdMS_TO_TICKS(portMAX_DELAY));    
+        if(Bits_loop & (FLAG_POWER))
         {
            
              if(semafore)
@@ -445,9 +449,12 @@ void one_blink()
     led2_reserve=true;
     leds_crush=true;
 
+    EventBits_t Bits_reverse;
+
     while (1)
     {   
-        if(task_check_power_ready)
+        Bits_reverse = xEventGroupWaitBits(xEventGroup, FLAG_POWER, pdFALSE,  pdFALSE,    pdMS_TO_TICKS(portMAX_DELAY));    
+        if(Bits_reverse & (FLAG_POWER))
         {
             if(!semafore)
             {     
@@ -550,13 +557,15 @@ bool repeat_check=true;
 
 void check_leds()
 {
-    
-    
+    EventBits_t uxBits;
+
     while (1)
     {   
-        if(task_check_power_ready)
+        
+        uxBits = xEventGroupWaitBits(xEventGroup, FLAG_POWER, pdFALSE,  pdFALSE,    pdMS_TO_TICKS(portMAX_DELAY));    
+        if(uxBits & (FLAG_POWER))
         {   
-            
+            ESP_LOGE(TAG, "check_leds");
                         if(!gpio_get_level(GPIO_OVERHEAT1))
                         {
                             if(!led1_enable)
@@ -654,7 +663,7 @@ void check_leds()
                     semafore=false;
                 }
            
-        } 
+        } else ESP_LOGE(TAG, "бит не установлен");
         vTaskDelay(500/ portTICK_PERIOD_MS);
     }
     
@@ -679,7 +688,7 @@ void check_power(void *pvParameters)
     while (1)
     {   
 
-        if(!gpio_get_level(GPIO_BUTTON_POWER))
+        /* if(!gpio_get_level(GPIO_BUTTON_POWER))
         {
             vTaskDelay(50);
         }
@@ -715,7 +724,45 @@ void check_power(void *pvParameters)
                 }
             }
         //ESP_LOGI(TAG, "Задача check power работает");
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        vTaskDelay(500 / portTICK_PERIOD_MS); */
+
+        if(!gpio_get_level(GPIO_BUTTON_POWER))
+        {
+            vTaskDelay(50);
+        }
+
+        if(!gpio_get_level(GPIO_BUTTON_POWER))
+        {
+            if(tasks_suspended)
+            {
+             
+                xEventGroupSetBits(xEventGroup, FLAG_POWER);
+                ESP_LOGI(TAG, "контроллер включен");
+                tasks_suspended=false;
+                
+            }
+                
+            
+        }
+        else 
+            {
+                if(!tasks_suspended)
+                {
+                    xEventGroupClearBits(xEventGroup, FLAG_POWER);
+                    gpio_set_level(GPIO_LED11, 0);
+                    gpio_set_level(GPIO_LED12, 0);
+                    gpio_set_level(GPIO_RELAY_1, 0);
+                    gpio_set_level(GPIO_RELAY_2, 0);
+                    gpio_set_level(GPIO_LED21, 0);
+                    gpio_set_level(GPIO_LED22, 0);
+                    gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                    
+                    ESP_LOGE(TAG, "контроллер выключен");
+                    tasks_suspended=true;
+                }
+            }
+        //ESP_LOGI(TAG, "Задача check power работает");
+        vTaskDelay(500 / portTICK_PERIOD_MS); 
     }
 }
 
@@ -724,10 +771,11 @@ void check_time(void *pvParameters)
     TickType_t wake_check_time = 0;
     led1_work=false;
     led2_work=false;
-
+    EventBits_t Bits_time;
     while (1)
     {  
-        if(task_check_power_ready)
+        Bits_time = xEventGroupWaitBits(xEventGroup, FLAG_POWER, pdFALSE,  pdFALSE,    pdMS_TO_TICKS(portMAX_DELAY));    
+        if(Bits_time & (FLAG_POWER))
         {
             if(led1_work)
             {
@@ -843,10 +891,11 @@ void check_acidification(void *pvParameters)
         ESP_LOGI("main", "Software FreeRTOS timer2 stated");
     };
 
-
+    EventBits_t Bits_acidification;
     while (1)
     {  
-        if(task_check_power_ready)
+        Bits_acidification = xEventGroupWaitBits(xEventGroup, FLAG_POWER, pdFALSE,  pdFALSE,    pdMS_TO_TICKS(portMAX_DELAY));    
+        if(Bits_acidification & (FLAG_POWER))
         {
             if(led1_work||!led1_enable||!phase_pump1) 
                 xTimerReset(_timer1, 5);
@@ -970,18 +1019,23 @@ void app_main()
     ESP_LOGI(TAG, "Система запущена. Подключитесь к WiFi: %s", EXAMPLE_ESP_WIFI_SSID);
     ESP_LOGI(TAG, "Откройте браузер и перейдите по адресу: http://192.168.4.1");
 
+
+    xEventGroup = xEventGroupCreate();
+
     vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+    
 
     xTaskCreate(check_leds, "check_leds", 4096, NULL, 5, NULL);
 
 
-    
+    xTaskCreate(check_power, "check_power", 4096, NULL, 7, NULL);
 
     xTaskCreate(blink_loop, "blink_loop", 4096, NULL, 5, NULL);
 
     xTaskCreate(one_blink,"one blink",4096, NULL, 5, NULL);
 
-    xTaskCreate(check_power, "check_power", 4096, NULL, 7, NULL);
+    
 
     xTaskCreate(check_time, "check_time", 4096, NULL, 5, NULL);
 
