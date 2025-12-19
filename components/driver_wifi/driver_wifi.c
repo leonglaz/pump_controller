@@ -35,14 +35,19 @@ static const char html_template[] =
             "<a href=/ledoff2 class='btn off'>ВЫКЛ</a></div>"
         "<div><h2>Часы: <strong>%ld</strong></h2>"
         "<form method='POST' action='/'>"
-            "<input type='number' name='hours' min='1' max='100' value='%ld'>"
+            "<input type='number' name='hours' min='1' max='100'>"
             "<input type='submit' class='btn off' value='Сохранить'>"
         "</form></div>"
-/*         "<div><h2>Время для антизакисания: <strong>%ld</strong></h2>"
+        "<div><h2>Время для антизакисания: <strong>%ld</strong></h2>"
         "<form method='POST' action='/'>"
-            "<input type='number' name='hours' min='1' max='100' value='%ld'>"
+            "<input type='number' name='acidification' min='1' max='100'>"
             "<input type='submit' class='btn off' value='Сохранить'>"
-        "</form></div>" */
+        "</form></div>"
+        "<div><h2>Время сохранений: <strong>%ld</strong></h2>"
+        "<form method='POST' action='/'>"
+            "<input type='number' name='save' min='1' max='100'>"
+            "<input type='submit' class='btn off' value='Сохранить'>"
+        "</form></div>"
     "</body></html>";
 
 // Обработчик WiFi событий
@@ -132,6 +137,31 @@ static esp_err_t post_handler(httpd_req_t *req)
         }
     }
 
+    uint32_t new_acidification=1;
+    char *acidification_start = strstr(buf, "acidification=");
+    if (acidification_start) {
+        acidification_start += 14;
+        new_acidification = atoi(acidification_start);
+        if (new_acidification >= 1) {
+            
+            
+            wifi_ptr_pump->timer_acidification = new_acidification;
+            ESP_LOGI(TAG_WIFI, "Новое время антизакисания: %d",wifi_ptr_pump->timer_acidification);
+        }
+    }
+
+    uint32_t new_save=1;
+    char *save_start = strstr(buf, "save=");
+    if (save_start) {
+        save_start += 5;
+        new_save = atoi(save_start);
+        if (new_save >= 1) {
+            
+            
+            wifi_ptr_pump->period_save_nvs = new_save;
+            ESP_LOGI(TAG_WIFI, "Новое время сохранений: %d",wifi_ptr_pump->period_save_nvs);
+        }
+    }
     
     // Редирект на главную
     httpd_resp_set_status(req, "303 See Other");
@@ -143,12 +173,12 @@ static esp_err_t post_handler(httpd_req_t *req)
 // Обработчик GET запросов (главная страница)
 static esp_err_t get_handler(httpd_req_t *req)
 {
-    char response[1024];
+    char response[2048];
     const char* led1_status =  wifi_ptr_pump->led1_work ? "ВКЛ" : "ВЫКЛ";
     const char* led2_status = wifi_ptr_pump->led2_work ? "ВКЛ" : "ВЫКЛ";
     
     int len = snprintf(response, sizeof(response), html_template, 
-                      led1_status, led2_status, wifi_ptr_pump->hours, wifi_ptr_pump->hours);
+                      led1_status, led2_status, wifi_ptr_pump->hours, wifi_ptr_pump->timer_acidification, wifi_ptr_pump->period_save_nvs);
     
     if (len > 0 && len < sizeof(response)) {
         httpd_resp_set_type(req, "text/html");

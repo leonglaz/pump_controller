@@ -558,6 +558,25 @@ void timer2_callback(TimerHandle_t pxTimer)
     acidification=false;
 }
 
+void timer3_callback(TimerHandle_t pxTimer)
+{
+    acidification=true;
+    ESP_LOGW("timer2", "timer2 acidification on ");
+    gpio_set_level(GPIO_RELAY_2, 1);
+    gpio_set_level(GPIO_LED21, 1);
+    gpio_set_level(GPIO_LED22, 0);
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    if(!ptr_pump_t->led2_work)
+    {
+        gpio_set_level(GPIO_RELAY_2, 0);
+        gpio_set_level(GPIO_LED21, 0);
+        gpio_set_level(GPIO_LED22, 0);
+    }
+        
+    acidification=false;
+}
+
+
 void check_acidification(void *pvParameters)
 {
     _timer1 = xTimerCreate("Timer1", pdMS_TO_TICKS(ptr_pump_t->timer_acidification*1000),  pdTRUE, NULL, timer1_callback);
@@ -571,6 +590,8 @@ void check_acidification(void *pvParameters)
     if (xTimerStart( _timer2, 0) == pdPASS) {
         ESP_LOGI("main", "Software FreeRTOS timer2 stated");
     };
+
+    uint32_t last_timer_acidification=ptr_pump_t->timer_acidification;
 
     EventBits_t Bits_acidification;
     while (1)
@@ -587,9 +608,14 @@ void check_acidification(void *pvParameters)
             xTimerReset(_timer2, 5);
         }
                 
+        if (last_timer_acidification!=ptr_pump_t->timer_acidification)
+        {
+            xTimerChangePeriod(_timer1, pdMS_TO_TICKS(ptr_pump_t->timer_acidification*1000),5);
+            xTimerChangePeriod(_timer2, pdMS_TO_TICKS(ptr_pump_t->timer_acidification*1000),5);
+            last_timer_acidification=ptr_pump_t->timer_acidification;
             
+        }
         
-
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
@@ -644,7 +670,7 @@ void app_main()
     gpio_reset_pin(GPIO_LED12);
     gpio_set_direction(GPIO_LED12, GPIO_MODE_OUTPUT);
     gpio_set_level(GPIO_LED12, 0);
-    //gpio_reset_pin(GPIO_OVERHEAT1);
+
     gpio_set_direction(GPIO_OVERHEAT1, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_OVERHEAT1, GPIO_FLOATING);
     gpio_reset_pin(GPIO_PHASE_11);
@@ -669,7 +695,7 @@ void app_main()
     gpio_reset_pin(GPIO_LED22);
     gpio_set_direction(GPIO_LED22, GPIO_MODE_OUTPUT);
     gpio_set_level(GPIO_LED22, 0);
-    //gpio_reset_pin(GPIO_OVERHEAT2);
+
     gpio_set_direction(GPIO_OVERHEAT2, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_OVERHEAT2, GPIO_FLOATING);
     gpio_reset_pin(GPIO_PHASE_21);
@@ -684,13 +710,11 @@ void app_main()
 
    
     // initialization GPIO general
-    //gpio_reset_pin(GPIO_BUTTON_POWER);
     gpio_set_direction(GPIO_BUTTON_POWER, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_BUTTON_POWER, GPIO_FLOATING);
     gpio_reset_pin(GPIO_RELAY_CRUSH);
     gpio_set_direction(GPIO_RELAY_CRUSH, GPIO_MODE_OUTPUT);
     gpio_set_level(GPIO_RELAY_CRUSH, 0);
-    //gpio_reset_pin(GPIO_VOLTAGE);
     gpio_set_direction(GPIO_VOLTAGE, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_VOLTAGE, GPIO_FLOATING);
 
