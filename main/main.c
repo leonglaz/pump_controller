@@ -4,41 +4,22 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
-#include <esp_http_server.h>
+#include <esp_http_server.h> 
 #include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "freertos/event_groups.h"
+#include "freertos/timers.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "esp_netif.h"
 #include "driver/gpio.h"
-#include <lwip/sockets.h>
-#include <lwip/sys.h>
-#include <lwip/api.h>
-#include <lwip/netdb.h>
 #include <time.h>
-#include "driver/uart.h"
+
 #include "driver_nvs.h"
-#include "freertos/timers.h"
+#include "driver_wifi.h"
+#include "struct_pump.h"
 
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#endif
-
-static const char *TAG = "Pump_Conroller";
-
-uint32_t pump1_work_minutes=0;
-uint32_t pump2_work_minutes=0;
-
-// Конфигурация WiFi
 #define EXAMPLE_ESP_WIFI_SSID "ESP32_UART_Server"
-#define EXAMPLE_ESP_WIFI_PASS "12345678"
-#define EXAMPLE_ESP_WIFI_CHANNEL 1
-#define EXAMPLE_MAX_STA_CONN 4
-
-
-
 
 #define GPIO_LED11 14
 #define GPIO_LED12 27
@@ -71,23 +52,22 @@ uint32_t pump2_work_minutes=0;
 #define FLAG_CRUSH (1<<5)
 #define FLAG_ACDIFICATION (1<<6)
 
+
+struct_pump_t pump_t ={0};
+struct_pump_t * ptr_pump_t=&pump_t;
+
 EventGroupHandle_t xEventGroup;
+
+static const char *TAG = "Pump_Conroller";
+
+uint32_t pump1_work_minutes=0;
+uint32_t pump2_work_minutes=0;
+
+
 static uint8_t led_state1 = 0;
-static int led_state2 = 0;
 static bool led1_enable = false;
 static bool led2_enable = false;
-static uint32_t hours = 60*1;
-static uint32_t period_save_nvs=60*0.5;
 
-uint32_t timer1_acidification=20;
-uint32_t timer2_acidification=20;
-bool semafore=true;
-bool task_check_power_ready=false;
-
-
-bool phase_pump1=false;
-bool phase_pump2=false;
-bool voltage_work=true;
 
 uint32_t led1_work_time=0;
 uint32_t led2_work_time=0;
@@ -97,258 +77,10 @@ TimerHandle_t _timer1 = NULL;
 TimerHandle_t _timer2 = NULL;
 bool acidification=false;
 
-static const char html_template[] = 
-"<!DOCTYPE html><html><head>"
-"<meta charset=UTF-8><title>ESP32</title><meta name=viewport content='width=device-width,initial-scale=1'>"
-"<style>"
-"body{font-family:Arial;text-align:center;margin:20px}"
-".btn{padding:10px 20px;margin:5px;border:none;border-radius:4px;color:white;text-decoration:none;display:inline-block}"
-".on{background:#0a0}"
-".off{background:#a00}"
-".led2{background:#00a}"
-"</style>"
-"</head>"
-"<body>"
-"<h1>ESP32 Web Server</h1>"
-"<div><h2>LED1: <strong>%s</strong></h2>"
-"<a href=/ledon class='btn on'>ВКЛ</a>"
-"<a href=/ledoff class='btn off'>ВЫКЛ</a></div>"
-"<div><h2>LED2: <strong>%s</strong></h2>"
-"<a href=/ledon2 class='btn led2'>ВКЛ</a>"
-"<a href=/ledoff2 class='btn off'>ВЫКЛ</a></div>"
-"<div><h2>Часы: <strong>%ld</strong></h2>"
-"<form method='POST' action='/'>"
-"<input type='number' name='hours' min='1' max='100' value='%ld'>"
-"<input type='submit' class='btn off' value='Сохранить'>"
-"</form></div>"
-"</body></html>";
-
-// Обработчик WiFi событий
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                               int32_t event_id, void* event_data)
-{
-    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-        ESP_LOGI(TAG, "Устройство подключено");
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        ESP_LOGI(TAG, "Устройство отключено");
-    }
-}
-
-// Инициализация WiFi
-static void wifi_init_softap(void)
-{
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_ap();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        NULL));
-
-    wifi_config_t wifi_config = {
-        .ap = {
-            .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .channel = EXAMPLE_ESP_WIFI_CHANNEL,
-            .password = EXAMPLE_ESP_WIFI_PASS,
-            .max_connection = EXAMPLE_MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA2_PSK
-        },
-    };
-
-    if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    }
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "WiFi AP запущен: %s", EXAMPLE_ESP_WIFI_SSID);
-}
-
-// Обработчик POST запросов - ИСПРАВЛЕННЫЙ
-static esp_err_t post_handler(httpd_req_t *req)
-{
-    
-    char buf[64];
-    int ret;
-    int remaining = req->content_len;
-    int total_read = 0;
-    
-    // Читаем тело POST запроса
-    while (remaining > 0 && total_read < sizeof(buf) - 1) {
-        ret = httpd_req_recv(req, buf + total_read, 
-                            MIN(remaining, sizeof(buf) - total_read - 1));
-        if (ret <= 0) {
-            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-                continue;
-            }
-            break;
-        }
-        total_read += ret;
-        remaining -= ret;
-    }
-    buf[total_read] = '\0';
-    
-    ESP_LOGI(TAG, "Получено POST: %s", buf);
-    int new_hours=1;
-
-    char *hours_start = strstr(buf, "hours=");
-    if (hours_start) {
-        hours_start += 6; // Пропускаем "hours="
-        new_hours = atoi(hours_start);
-        if (new_hours >= 1) {
-            
-            
-            hours = new_hours;
-            ESP_LOGI(TAG, "Новое время смены насосов: %d", hours);
-        }
-    }
-
-    
-    // Редирект на главную
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
-// Обработчик GET запросов (главная страница)
-static esp_err_t get_handler(httpd_req_t *req)
-{
-    char response[1024];
-    const char* led1_status = led_state1 ? "ВКЛ" : "ВЫКЛ";
-    const char* led2_status = led_state2 ? "ВКЛ" : "ВЫКЛ";
-    
-    int len = snprintf(response, sizeof(response), html_template, 
-                      led1_status, led2_status, hours, hours);
-    
-    if (len > 0 && len < sizeof(response)) {
-        httpd_resp_set_type(req, "text/html");
-        return httpd_resp_send(req, response, len);
-    }
-    
-    return ESP_FAIL;
-}
-
-// Функция редиректа
-static esp_err_t redirect_to_home(httpd_req_t *req)
-{
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
-// Обработчики LED
-static esp_err_t led_on_handler(httpd_req_t *req)
-{
-    led_state1 = 1;
-    led1_enable = true;
-    return redirect_to_home(req);
-}
-
-static esp_err_t led_off_handler(httpd_req_t *req)
-{
-    led_state1 = 0;
-    led1_enable = false;
-    return redirect_to_home(req);
-}
-
-static esp_err_t led_on_handler2(httpd_req_t *req)
-{
-    led_state2 = 1;
-    led2_enable = true;
-    return redirect_to_home(req);
-}
-
-static esp_err_t led_off_handler2(httpd_req_t *req)
-{
-    led_state2 = 0;
-    led2_enable = false;
-    return redirect_to_home(req);
-}
-
-// URI handlers
-static const httpd_uri_t root = {
-    .uri = "/",
-    .method = HTTP_GET,
-    .handler = get_handler,
-    .user_ctx = NULL
-};
-
-static const httpd_uri_t post = {
-    .uri = "/",
-    .method = HTTP_POST,
-    .handler = post_handler,
-    .user_ctx = NULL
-};
-
-static const httpd_uri_t ledon = {
-    .uri = "/ledon",
-    .method = HTTP_GET,
-    .handler = led_on_handler,
-    .user_ctx = NULL
-};
-
-static const httpd_uri_t ledoff = {
-    .uri = "/ledoff",
-    .method = HTTP_GET,
-    .handler = led_off_handler,
-    .user_ctx = NULL
-};
-
-static const httpd_uri_t ledon2 = {
-    .uri = "/ledon2",
-    .method = HTTP_GET,
-    .handler = led_on_handler2,
-    .user_ctx = NULL
-};
-
-static const httpd_uri_t ledoff2 = {
-    .uri = "/ledoff2",
-    .method = HTTP_GET,
-    .handler = led_off_handler2,
-    .user_ctx = NULL
-};
-
-// Инициализация HTTP сервера
-static void start_webserver(void)
-{
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.stack_size = 8192;
-    config.task_priority = tskIDLE_PRIORITY + 3;
-    config.max_uri_handlers = 8;
-    config.lru_purge_enable = true;
-    config.recv_wait_timeout = 10;
-    config.send_wait_timeout = 10;
-    
-    ESP_LOGI(TAG, "Запуск HTTP сервера на порту: %d", config.server_port);
-    
-    httpd_handle_t server = NULL;
-    if (httpd_start(&server, &config) == ESP_OK) {
-        // Регистрация обработчиков
-        httpd_register_uri_handler(server, &root);
-        httpd_register_uri_handler(server, &post);
-        httpd_register_uri_handler(server, &ledon);
-        httpd_register_uri_handler(server, &ledoff);
-        httpd_register_uri_handler(server, &ledon2);
-        httpd_register_uri_handler(server, &ledoff2);
-        
-        ESP_LOGI(TAG, "HTTP сервер успешно запущен");
-    } else {
-        ESP_LOGE(TAG, "Ошибка запуска HTTP сервера");
-    }
-}
 
 
-bool led1_work=false;
-bool led2_work=false;
+
+
 
 void working()
 {
@@ -368,69 +100,69 @@ void working()
         {
            
              
-                    if  (do_change)            
-                    {
-                        if(led_state1)
-                        {
-                            led_state1=0;
-                        }else led_state1=1;
-                        
-                        do_change=false;
-                        i=0;
-                    }
-                    
+            if  (do_change)            
+            {
+                if(led_state1)
+                {
+                    led_state1=0;
+                }else led_state1=1;
+                
+                do_change=false;
+                i=0;
+            }
+            
 
-                    if(led_state1)
-                    {
-                        gpio_set_level(GPIO_LED11, 1);
-                        gpio_set_level(GPIO_LED12, 0);
+            if(led_state1)
+            {
+                gpio_set_level(GPIO_LED11, 1);
+                gpio_set_level(GPIO_LED12, 0);
+                
+                
+                gpio_set_level(GPIO_RELAY_1, 1);
+                
+                gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
+                ptr_pump_t->led1_work=true;
+                ptr_pump_t->led2_work=false;
+
+                if(!acidification)
+                {   
+                    gpio_set_level(GPIO_RELAY_2, 0);
+                    gpio_set_level(GPIO_LED21, 0);
+                    gpio_set_level(GPIO_LED22, 1);
+                }
+                
+
+            }else    
+                    {   
                         
+                        gpio_set_level(GPIO_LED21, 1);
+                        gpio_set_level(GPIO_LED22, 0);
                         
-                        gpio_set_level(GPIO_RELAY_1, 1);
-                        
+                        gpio_set_level(GPIO_RELAY_2, 1);
                         gpio_set_level(GPIO_RELAY_CRUSH, 0);
-                        ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
-                        led1_work=true;
-                        led2_work=false;
+                        ESP_LOGI(TAG, "LED2 горит %d, time2 %d", i,  led2_work_time);
+                        ptr_pump_t->led1_work=false;
+                        ptr_pump_t->led2_work=true;
 
                         if(!acidification)
-                        {   
-                            gpio_set_level(GPIO_RELAY_2, 0);
-                            gpio_set_level(GPIO_LED21, 0);
-                            gpio_set_level(GPIO_LED22, 1);
+                        {
+                            gpio_set_level(GPIO_RELAY_1, 0);
+                            gpio_set_level(GPIO_LED11, 0);
+                            gpio_set_level(GPIO_LED12, 1);
                         }
                         
-
-                    }else    
-                            {   
-                                
-                                gpio_set_level(GPIO_LED21, 1);
-                                gpio_set_level(GPIO_LED22, 0);
-                               
-                                gpio_set_level(GPIO_RELAY_2, 1);
-                                gpio_set_level(GPIO_RELAY_CRUSH, 0);
-                                ESP_LOGI(TAG, "LED2 горит %d, time2 %d", i,  led2_work_time);
-                                led1_work=false;
-                                led2_work=true;
-
-                                if(!acidification)
-                                {
-                                    gpio_set_level(GPIO_RELAY_1, 0);
-                                    gpio_set_level(GPIO_LED11, 0);
-                                    gpio_set_level(GPIO_LED12, 1);
-                                }
-                                
-                            }
-                    i++;
-                    vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( 1000 )) ;
+                    }
+            i++;
+            vTaskDelayUntil ( &prevWakeup, pdMS_TO_TICKS ( 1000 )) ;
              
         }
         else if(!(Bits_working & (FLAG_POWER)) && (Bits_working & FLAG_PUMP1_READY) && (Bits_working & FLAG_PUMP2_READY))
         {
             gpio_set_level(GPIO_RELAY_CRUSH, 0);
             ESP_LOGI(TAG, "working нет питания");
-            led1_work=false;
-            led2_work=false;
+            ptr_pump_t->led1_work=false;
+            ptr_pump_t->led2_work=false;
 
             if(!acidification)
             {
@@ -484,8 +216,8 @@ void reverse()
                 ESP_LOGI(TAG, "насос 1 работает  в резерве");
        
 
-                led1_work=true;
-                led2_work=false;
+                ptr_pump_t->led1_work=true;
+                ptr_pump_t->led2_work=false;
                            
         }else  if(!(Bits_reverse & FLAG_PUMP1_READY) && (Bits_reverse & FLAG_PUMP2_READY))
                 {   
@@ -510,8 +242,8 @@ void reverse()
                     gpio_set_level(GPIO_RELAY_CRUSH, 0);
                     ESP_LOGI(TAG, "насос 2 работает  в резерве");
                     
-                    led1_work=false;
-                    led2_work=true;
+                    ptr_pump_t->led1_work=false;
+                    ptr_pump_t->led2_work=true;
                 }
             
             
@@ -545,8 +277,8 @@ void crush()
             
             ESP_LOGI(TAG, "оба насоса сломаны");
 
-            led1_work=false;
-            led2_work=false;           
+            ptr_pump_t->led1_work=false;
+            ptr_pump_t->led2_work=false;           
             
             if((Bits_crush & FLAG_POWER))
             {
@@ -573,6 +305,10 @@ void check_pumps()
             if(gpio_get_level(GPIO_VOLTAGE))
             {
                     //ESP_LOGE(TAG, "Напряжение 380");
+                    if (gpio_get_level(GPIO_PHASE_11)||gpio_get_level(GPIO_PHASE_12)||gpio_get_level(GPIO_PHASE_13)||gpio_get_level(GPIO_OVERHEAT1))
+                    {
+                        vTaskDelay(100);
+                    }
 
                     if (gpio_get_level(GPIO_PHASE_11)||gpio_get_level(GPIO_PHASE_12)||gpio_get_level(GPIO_PHASE_13)||gpio_get_level(GPIO_OVERHEAT1))
                     {
@@ -580,6 +316,11 @@ void check_pumps()
                         ESP_LOGE(TAG, "Фазы 1 насоса сломаны или насос перегрет");
                         
                     }else   xEventGroupSetBits(xEventGroup, FLAG_PUMP1_READY);
+
+                    if (gpio_get_level(GPIO_PHASE_21)||gpio_get_level(GPIO_PHASE_22)||gpio_get_level(GPIO_PHASE_23)||gpio_get_level(GPIO_OVERHEAT1))
+                    {
+                        vTaskDelay(100);
+                    }
 
                     if (gpio_get_level(GPIO_PHASE_21)||gpio_get_level(GPIO_PHASE_22)||gpio_get_level(GPIO_PHASE_23)||gpio_get_level(GPIO_OVERHEAT1))
                     {
@@ -593,6 +334,11 @@ void check_pumps()
                     //ESP_LOGE(TAG, "Напряжение 220");
                     if(gpio_get_level(GPIO_OVERHEAT1))
                     {
+                        vTaskDelay(100);
+                    }
+
+                    if(gpio_get_level(GPIO_OVERHEAT1))
+                    {
                         xEventGroupClearBits(xEventGroup, FLAG_PUMP1_READY);
                         ESP_LOGE(TAG, "led1 перегрев");
                     }
@@ -601,6 +347,11 @@ void check_pumps()
                             xEventGroupSetBits(xEventGroup, FLAG_PUMP1_READY);
                         }
                     
+                    if(gpio_get_level(GPIO_OVERHEAT2))
+                    {
+                        vTaskDelay(100);
+                    }
+
                     if(gpio_get_level(GPIO_OVERHEAT2))
                     {
                         xEventGroupClearBits(xEventGroup, FLAG_PUMP2_READY);
@@ -695,25 +446,23 @@ void check_power(void *pvParameters)
 void check_time(void *pvParameters)
 {
     TickType_t wake_check_time = 0;
-    led1_work=false;
-    led2_work=false;
+    ptr_pump_t->led1_work=false;
+    ptr_pump_t->led2_work=false;
     EventBits_t Bits_time;
     while (1)
     {  
         Bits_time = xEventGroupWaitBits(xEventGroup, FLAG_POWER, pdFALSE,  pdFALSE,    pdMS_TO_TICKS(portMAX_DELAY));    
         if(Bits_time & (FLAG_POWER))
         {
-            if(led1_work)
+            if(ptr_pump_t->led1_work)
             {
                
                 led1_work_time++;
                 pump1_work_minutes++;
-                //ESP_LOGE(TAG, "led1_work_time %d", led1_work_time);
-                if(led1_work_time%period_save_nvs==0)
-                {
-                    if(led1_work_time>=hours)
+
+                if(led1_work_time>=ptr_pump_t->hours)
                     {
-                        ESP_LOGE(TAG, "led1_work_time %d hours %d", led1_work_time, hours);
+                        ESP_LOGE(TAG, "led1_work_time %d hours %d", led1_work_time, ptr_pump_t->hours);
                         if(!do_change)
                         {
                             do_change=true;
@@ -721,6 +470,10 @@ void check_time(void *pvParameters)
                         led1_work_time=0;
                         
                     }
+                //ESP_LOGE(TAG, "led1_work_time %d", led1_work_time);
+                if(led1_work_time%ptr_pump_t->period_save_nvs==0)
+                {
+                    
                     driver_nvs_write_u32(pump1_work_minutes,"pump1"); 
                     driver_nvs_write_u32(led1_work_time, "change1");
                     driver_nvs_write_u8(led_state1, "active_pump");
@@ -731,23 +484,25 @@ void check_time(void *pvParameters)
                 
                 
             }      
-            if (led2_work)
+            if (ptr_pump_t->led2_work)
             {
                 led2_work_time++;
                 pump2_work_minutes++;
                 
-                if (led2_work_time%period_save_nvs==0)
+                if(led2_work_time>=ptr_pump_t->hours)
                 {
-                    if(led2_work_time>=hours)
+                    
+                    if(!do_change)
                     {
-                        
-                        if(!do_change)
-                        {
-                            do_change=true;
-                        }
-                        led2_work_time=0;
-                        
+                        do_change=true;
                     }
+                    led2_work_time=0;
+                    
+                }
+
+                if (led2_work_time%ptr_pump_t->period_save_nvs==0)
+                {
+                    
                     driver_nvs_write_u32(pump2_work_minutes,"pump2");
                     driver_nvs_write_u32(led2_work_time, "change2"); 
                     driver_nvs_write_u8(led_state1, "active_pump");
@@ -775,7 +530,7 @@ void timer1_callback(TimerHandle_t pxTimer)
     gpio_set_level(GPIO_LED11, 1);
     gpio_set_level(GPIO_LED12, 0);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-    if(!led1_work)
+    if(!ptr_pump_t->led1_work)
     {
         gpio_set_level(GPIO_RELAY_1, 0);
         gpio_set_level(GPIO_LED11, 0);
@@ -793,7 +548,7 @@ void timer2_callback(TimerHandle_t pxTimer)
     gpio_set_level(GPIO_LED21, 1);
     gpio_set_level(GPIO_LED22, 0);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-    if(!led2_work)
+    if(!ptr_pump_t->led2_work)
     {
         gpio_set_level(GPIO_RELAY_2, 0);
         gpio_set_level(GPIO_LED21, 0);
@@ -805,13 +560,13 @@ void timer2_callback(TimerHandle_t pxTimer)
 
 void check_acidification(void *pvParameters)
 {
-    _timer1 = xTimerCreate("Timer1", pdMS_TO_TICKS(1000*timer1_acidification),  pdTRUE, NULL, timer1_callback);
+    _timer1 = xTimerCreate("Timer1", pdMS_TO_TICKS(ptr_pump_t->timer_acidification*1000),  pdTRUE, NULL, timer1_callback);
     // Запускаем таймер
     if (xTimerStart( _timer1, 0) == pdPASS) {
         ESP_LOGI("main", "Software FreeRTOS timer1 stated");
     };
 
-    _timer2 = xTimerCreate("Timer2", pdMS_TO_TICKS(1000*timer2_acidification),  pdTRUE, NULL, timer2_callback);
+    _timer2 = xTimerCreate("Timer2", pdMS_TO_TICKS(ptr_pump_t->timer_acidification*1000),  pdTRUE, NULL, timer2_callback);
     // Запускаем таймер
     if (xTimerStart( _timer2, 0) == pdPASS) {
         ESP_LOGI("main", "Software FreeRTOS timer2 stated");
@@ -821,13 +576,13 @@ void check_acidification(void *pvParameters)
     while (1)
     {  
         
-        if(led1_work||!(xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY)) 
+        if(ptr_pump_t->led1_work||!(xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY)) 
         {
             xTimerReset(_timer1, 5);
         }
                 
 
-        if(led2_work||!(xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY))
+        if(ptr_pump_t->led2_work||!(xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY))
         {
             xTimerReset(_timer2, 5);
         }
@@ -842,6 +597,14 @@ void check_acidification(void *pvParameters)
 
 void app_main()
 {
+
+
+    ptr_pump_t->led1_work=false;
+    ptr_pump_t->led2_work=false;
+    ptr_pump_t->hours = 60*1;
+    ptr_pump_t->period_save_nvs=60*0.5;
+
+    ptr_pump_t->timer_acidification=20;
     // initialization NVS
     driver_nvs_init();
 
@@ -937,7 +700,7 @@ void app_main()
 
     // Инициализация WiFi
     wifi_init_softap();
-
+    wifi_set_struct_pump(ptr_pump_t);
     
     // Запуск HTTP сервера
     start_webserver();

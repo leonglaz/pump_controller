@@ -4,13 +4,14 @@ idf_component_register(
                         INCLUDE_DIRS 
                                 "." 
                                 "../components/driver_nvs"
+                                "../components/driver_wifi"
                         REQUIRES 
                                 driver_nvs 
+                                driver_wifi
                         PRIV_REQUIRES 
                                 spi_flash 
                                 esp_wifi 
                                 nvs_flash 
-                                esp_http_server
                                 driver 
                                 esp_driver_gpio
 )
