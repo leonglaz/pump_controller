@@ -16,23 +16,25 @@ uint32_t wifi_hours=60;
 
 static const char html_template[] = 
 "<!DOCTYPE html><html><head>"
-"<meta charset=UTF-8><title>ESP32</title><meta name=viewport content='width=device-width,initial-scale=1'>"
+"<meta charset=UTF-8><meta http-equiv=Refresh content=1 /><title>ESP32</title><meta name=viewport content='width=device-width,initial-scale=1'>"
 "<style>"
 "body{font-family:Arial;text-align:center;margin:20px}"
 ".btn{padding:10px 20px;margin:5px;border:none;border-radius:4px;color:white;text-decoration:none;display:inline-block}"
 ".on{background:#0a0}"
 ".off{background:#a00}"
-".led2{background:#00a}"
 "</style>"
 "</head>"
     "<body>"
-        "<h1>ESP32 Web Server</h1>"
-        "<div><h2>LED1: <strong>%s</strong></h2>"
-            "<a href=/ledon class='btn on'>ВКЛ</a>"
-            "<a href=/ledoff class='btn off'>ВЫКЛ</a></div>"
-        "<div><h2>LED2: <strong>%s</strong></h2>"
-            "<a href=/ledon2 class='btn led2'>ВКЛ</a>"
-            "<a href=/ledoff2 class='btn off'>ВЫКЛ</a></div>"
+        "<h1>Контроллер насосов</h1>"
+        "<div><h2>Ручное управление: <strong>%s</strong></h2>"
+            "<a href=/wificontrolon class='btn on'>ВКЛ</a>"
+            "<a href=/wificontroloff class='btn off'>ВЫКЛ</a></div>"
+        "<div><h2>Насос 1: <strong>%s</strong></h2>"
+            "<a href=/pump1on class='btn on'>ВКЛ</a>"
+            "<a href=/pump1off class='btn off'>ВЫКЛ</a></div>"
+        "<div><h2>Насос 2: <strong>%s</strong></h2>"
+            "<a href=/pump2on class='btn on'>ВКЛ</a>"
+            "<a href=/pump2off class='btn off'>ВЫКЛ</a></div>"
         "<div><h2>Часы: <strong>%ld</strong></h2>"
         "<form method='POST' action='/'>"
             "<input type='number' name='hours' min='1' max='100'>"
@@ -174,11 +176,17 @@ static esp_err_t post_handler(httpd_req_t *req)
 static esp_err_t get_handler(httpd_req_t *req)
 {
     char response[2048];
-    const char* led1_status =  wifi_ptr_pump->led1_work ? "ВКЛ" : "ВЫКЛ";
-    const char* led2_status = wifi_ptr_pump->led2_work ? "ВКЛ" : "ВЫКЛ";
+    const char* control_status =  wifi_ptr_pump->wifi_control ? "ВКЛ" : "ВЫКЛ";
+    const char* pump1_status =  wifi_ptr_pump->pump1_work ? "ВКЛ" : "ВЫКЛ";
+    const char* pump2_status = wifi_ptr_pump->pump2_work ? "ВКЛ" : "ВЫКЛ";
     
     int len = snprintf(response, sizeof(response), html_template, 
-                      led1_status, led2_status, wifi_ptr_pump->hours, wifi_ptr_pump->timer_acidification, wifi_ptr_pump->period_save_nvs);
+    control_status,
+    pump1_status, 
+    pump2_status, 
+    wifi_ptr_pump->hours, 
+    wifi_ptr_pump->timer_acidification, 
+    wifi_ptr_pump->period_save_nvs);
     
     if (len > 0 && len < sizeof(response)) {
         httpd_resp_set_type(req, "text/html");
@@ -198,31 +206,40 @@ static esp_err_t redirect_to_home(httpd_req_t *req)
 }
 
 // Обработчики LED
-static esp_err_t led_on_handler(httpd_req_t *req)
+static esp_err_t pump1_on(httpd_req_t *req)
 {
-    //led_state1 = 1;
-    //led1_enable = true;
+    wifi_ptr_pump->pump1_go=true;
     return redirect_to_home(req);
 }
 
-static esp_err_t led_off_handler(httpd_req_t *req)
+static esp_err_t pump1_off(httpd_req_t *req)
 {
-    //led_state1 = 0;
-    //led1_enable = false;
+    wifi_ptr_pump->pump1_go=false;
     return redirect_to_home(req);
 }
 
-static esp_err_t led_on_handler2(httpd_req_t *req)
+static esp_err_t pump2_on(httpd_req_t *req)
+{
+    wifi_ptr_pump->pump2_go=true;
+    return redirect_to_home(req);
+}
+
+static esp_err_t pump2_off(httpd_req_t *req)
+{
+    wifi_ptr_pump->pump2_go=false;
+    return redirect_to_home(req);
+}
+
+static esp_err_t wifi_control_on(httpd_req_t *req)
+{
+    wifi_ptr_pump->wifi_control=true;
+    return redirect_to_home(req);
+}
+
+static esp_err_t wifi_control_off(httpd_req_t *req)
 {
     
-    //led2_enable = true;
-    return redirect_to_home(req);
-}
-
-static esp_err_t led_off_handler2(httpd_req_t *req)
-{
-    
-    //led2_enable = false;
+    wifi_ptr_pump->wifi_control=false;
     return redirect_to_home(req);
 }
 
@@ -241,34 +258,47 @@ static const httpd_uri_t post = {
     .user_ctx = NULL
 };
 
-static const httpd_uri_t ledon = {
-    .uri = "/ledon",
+static const httpd_uri_t pump1on = {
+    .uri = "/pump1on",
     .method = HTTP_GET,
-    .handler = led_on_handler,
+    .handler = pump1_on,
     .user_ctx = NULL
 };
 
-static const httpd_uri_t ledoff = {
-    .uri = "/ledoff",
+static const httpd_uri_t pump1off = {
+    .uri = "/pump1off",
     .method = HTTP_GET,
-    .handler = led_off_handler,
+    .handler = pump1_off,
     .user_ctx = NULL
 };
 
-static const httpd_uri_t ledon2 = {
-    .uri = "/ledon2",
+static const httpd_uri_t pump2on = {
+    .uri = "/pump2on",
     .method = HTTP_GET,
-    .handler = led_on_handler2,
+    .handler = pump2_on,
     .user_ctx = NULL
 };
 
-static const httpd_uri_t ledoff2 = {
-    .uri = "/ledoff2",
+static const httpd_uri_t pump2off = {
+    .uri = "/pump2off",
     .method = HTTP_GET,
-    .handler = led_off_handler2,
+    .handler = pump2_off,
     .user_ctx = NULL
 };
 
+static const httpd_uri_t wificontrolon = {
+    .uri = "/wificontrolon",
+    .method = HTTP_GET,
+    .handler = wifi_control_on,
+    .user_ctx = NULL
+};
+
+static const httpd_uri_t wificontroloff = {
+    .uri = "/wificontroloff",
+    .method = HTTP_GET,
+    .handler = wifi_control_off,
+    .user_ctx = NULL
+};
 // Инициализация HTTP сервера
 void start_webserver(void)
 {
@@ -287,10 +317,12 @@ void start_webserver(void)
         // Регистрация обработчиков
         httpd_register_uri_handler(server, &root);
         httpd_register_uri_handler(server, &post);
-        httpd_register_uri_handler(server, &ledon);
-        httpd_register_uri_handler(server, &ledoff);
-        httpd_register_uri_handler(server, &ledon2);
-        httpd_register_uri_handler(server, &ledoff2);
+        httpd_register_uri_handler(server, &pump1on);
+        httpd_register_uri_handler(server, &pump1off);
+        httpd_register_uri_handler(server, &pump2on);
+        httpd_register_uri_handler(server, &pump2off);
+        httpd_register_uri_handler(server, &wificontrolon);
+        httpd_register_uri_handler(server, &wificontroloff);
         
         ESP_LOGI(TAG_WIFI, "HTTP сервер успешно запущен");
     } else {

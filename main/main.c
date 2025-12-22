@@ -51,6 +51,7 @@
 #define FLAG_REVERSE (1<<4)
 #define FLAG_CRUSH (1<<5)
 #define FLAG_ACDIFICATION (1<<6)
+#define FLAG_WIFI_CONTROL (1<<7)
 
 
 struct_pump_t pump_t ={0};
@@ -86,8 +87,7 @@ void working()
 {
     TickType_t prevWakeup = 0;
     uint16_t i=0;
-    uint16_t work_time=0;
-
+    
     EventBits_t Bits_working;
     
     while (1)
@@ -96,7 +96,7 @@ void working()
         FLAG_WORKING,
         pdTRUE, pdTRUE,    pdMS_TO_TICKS(portMAX_DELAY));    
 
-        if(Bits_working & (FLAG_POWER) && (Bits_working & FLAG_PUMP1_READY) && (Bits_working & FLAG_PUMP2_READY))
+        if(Bits_working & (FLAG_POWER) && (Bits_working & FLAG_PUMP1_READY) && (Bits_working & FLAG_PUMP2_READY) && !ptr_pump_t->wifi_control)
         {
            
              
@@ -122,14 +122,14 @@ void working()
                 
                 gpio_set_level(GPIO_RELAY_CRUSH, 0);
                 ESP_LOGI(TAG, "LED1 горит %d, time1 %d", i,  led1_work_time);
-                ptr_pump_t->led1_work=true;
-                ptr_pump_t->led2_work=false;
+                ptr_pump_t->pump1_work=true;
+                ptr_pump_t->pump2_work=false;
 
                 if(!acidification)
                 {   
                     gpio_set_level(GPIO_RELAY_2, 0);
                     gpio_set_level(GPIO_LED21, 0);
-                    gpio_set_level(GPIO_LED22, 1);
+                    gpio_set_level(GPIO_LED22, 0);
                 }
                 
 
@@ -142,14 +142,14 @@ void working()
                         gpio_set_level(GPIO_RELAY_2, 1);
                         gpio_set_level(GPIO_RELAY_CRUSH, 0);
                         ESP_LOGI(TAG, "LED2 горит %d, time2 %d", i,  led2_work_time);
-                        ptr_pump_t->led1_work=false;
-                        ptr_pump_t->led2_work=true;
+                        ptr_pump_t->pump1_work=false;
+                        ptr_pump_t->pump2_work=true;
 
                         if(!acidification)
                         {
                             gpio_set_level(GPIO_RELAY_1, 0);
                             gpio_set_level(GPIO_LED11, 0);
-                            gpio_set_level(GPIO_LED12, 1);
+                            gpio_set_level(GPIO_LED12, 0);
                         }
                         
                     }
@@ -161,8 +161,8 @@ void working()
         {
             gpio_set_level(GPIO_RELAY_CRUSH, 0);
             ESP_LOGI(TAG, "working нет питания");
-            ptr_pump_t->led1_work=false;
-            ptr_pump_t->led2_work=false;
+            ptr_pump_t->pump1_work=false;
+            ptr_pump_t->pump2_work=false;
 
             if(!acidification)
             {
@@ -216,8 +216,8 @@ void reverse()
                 ESP_LOGI(TAG, "насос 1 работает  в резерве");
        
 
-                ptr_pump_t->led1_work=true;
-                ptr_pump_t->led2_work=false;
+                ptr_pump_t->pump1_work=true;
+                ptr_pump_t->pump2_work=false;
                            
         }else  if(!(Bits_reverse & FLAG_PUMP1_READY) && (Bits_reverse & FLAG_PUMP2_READY))
                 {   
@@ -242,8 +242,8 @@ void reverse()
                     gpio_set_level(GPIO_RELAY_CRUSH, 0);
                     ESP_LOGI(TAG, "насос 2 работает  в резерве");
                     
-                    ptr_pump_t->led1_work=false;
-                    ptr_pump_t->led2_work=true;
+                    ptr_pump_t->pump1_work=false;
+                    ptr_pump_t->pump2_work=true;
                 }
             
             
@@ -277,8 +277,8 @@ void crush()
             
             ESP_LOGI(TAG, "оба насоса сломаны");
 
-            ptr_pump_t->led1_work=false;
-            ptr_pump_t->led2_work=false;           
+            ptr_pump_t->pump1_work=false;
+            ptr_pump_t->pump2_work=false;           
             
             if((Bits_crush & FLAG_POWER))
             {
@@ -380,6 +380,11 @@ void check_pumps()
                 xEventGroupSetBits(xEventGroup, FLAG_CRUSH);
             }
 
+            if((xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY) && (xEventGroupGetBits(xEventGroup) & FLAG_PUMP2_READY) && ptr_pump_t->wifi_control)
+            {
+                xEventGroupSetBits(xEventGroup, FLAG_WIFI_CONTROL);
+            }
+
         vTaskDelay(500/ portTICK_PERIOD_MS);
     }
     
@@ -446,15 +451,15 @@ void check_power(void *pvParameters)
 void check_time(void *pvParameters)
 {
     TickType_t wake_check_time = 0;
-    ptr_pump_t->led1_work=false;
-    ptr_pump_t->led2_work=false;
+    ptr_pump_t->pump1_work=false;
+    ptr_pump_t->pump2_work=false;
     EventBits_t Bits_time;
     while (1)
     {  
         Bits_time = xEventGroupWaitBits(xEventGroup, FLAG_POWER, pdFALSE,  pdFALSE,    pdMS_TO_TICKS(portMAX_DELAY));    
         if(Bits_time & (FLAG_POWER))
         {
-            if(ptr_pump_t->led1_work)
+            if(ptr_pump_t->pump1_work)
             {
                
                 led1_work_time++;
@@ -484,7 +489,7 @@ void check_time(void *pvParameters)
                 
                 
             }      
-            if (ptr_pump_t->led2_work)
+            if (ptr_pump_t->pump2_work)
             {
                 led2_work_time++;
                 pump2_work_minutes++;
@@ -530,7 +535,7 @@ void timer1_callback(TimerHandle_t pxTimer)
     gpio_set_level(GPIO_LED11, 1);
     gpio_set_level(GPIO_LED12, 0);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-    if(!ptr_pump_t->led1_work)
+    if(!ptr_pump_t->pump1_work)
     {
         gpio_set_level(GPIO_RELAY_1, 0);
         gpio_set_level(GPIO_LED11, 0);
@@ -548,7 +553,7 @@ void timer2_callback(TimerHandle_t pxTimer)
     gpio_set_level(GPIO_LED21, 1);
     gpio_set_level(GPIO_LED22, 0);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-    if(!ptr_pump_t->led2_work)
+    if(!ptr_pump_t->pump2_work)
     {
         gpio_set_level(GPIO_RELAY_2, 0);
         gpio_set_level(GPIO_LED21, 0);
@@ -566,7 +571,7 @@ void timer3_callback(TimerHandle_t pxTimer)
     gpio_set_level(GPIO_LED21, 1);
     gpio_set_level(GPIO_LED22, 0);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-    if(!ptr_pump_t->led2_work)
+    if(!ptr_pump_t->pump2_work)
     {
         gpio_set_level(GPIO_RELAY_2, 0);
         gpio_set_level(GPIO_LED21, 0);
@@ -597,13 +602,13 @@ void check_acidification(void *pvParameters)
     while (1)
     {  
         
-        if(ptr_pump_t->led1_work||!(xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY)) 
+        if(ptr_pump_t->pump1_work||!(xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY)) 
         {
             xTimerReset(_timer1, 5);
         }
                 
 
-        if(ptr_pump_t->led2_work||!(xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY))
+        if(ptr_pump_t->pump2_work||!(xEventGroupGetBits(xEventGroup) & FLAG_PUMP1_READY))
         {
             xTimerReset(_timer2, 5);
         }
@@ -620,13 +625,89 @@ void check_acidification(void *pvParameters)
     }
 }
 
+void wifi_conrol()
+{
+    
+    
+    uint16_t i=0;
+    uint16_t j=0;
+    EventBits_t Bits_wifi_control;
+    
+    while (1)
+    {   
+        Bits_wifi_control = xEventGroupWaitBits(xEventGroup, 
+        FLAG_WIFI_CONTROL,
+        pdTRUE, pdTRUE,    pdMS_TO_TICKS(portMAX_DELAY));    
+
+        if(Bits_wifi_control & (FLAG_POWER) && (Bits_wifi_control & FLAG_PUMP1_READY) && (Bits_wifi_control & FLAG_PUMP2_READY)&& (Bits_wifi_control & FLAG_WIFI_CONTROL))
+        {
+           
+            
+
+            if(ptr_pump_t->pump1_go)
+            {
+                gpio_set_level(GPIO_LED11, 1);
+                gpio_set_level(GPIO_LED12, 0);
+                gpio_set_level(GPIO_RELAY_1, 1);                
+                gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                ESP_LOGI(TAG, "PUMP1 горит в wifi режиме %d, time1 %d", i,  led1_work_time);
+                ptr_pump_t->pump1_work=true;
+
+                
+            } else  {
+                        if(!acidification)
+                        {
+                        gpio_set_level(GPIO_LED11, 0);
+                        gpio_set_level(GPIO_LED12, 0);
+                        gpio_set_level(GPIO_RELAY_1, 0);                
+                        }
+                        gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                        ptr_pump_t->pump1_work=false;
+                        i=0;
+                    }
+            
+            if(ptr_pump_t->pump2_go)
+            {   
+                
+                gpio_set_level(GPIO_LED21, 1);
+                gpio_set_level(GPIO_LED22, 0);
+                gpio_set_level(GPIO_RELAY_2, 1);
+                gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                ESP_LOGI(TAG, "PUMP2 горит в wifi режиме %d, time2 %d", j,  led2_work_time);
+                ptr_pump_t->pump2_work=true;
+
+                
+                
+                
+            } else  {
+                        if(!acidification)
+                        {
+                            gpio_set_level(GPIO_LED21, 0);
+                            gpio_set_level(GPIO_LED22, 0);
+                            gpio_set_level(GPIO_RELAY_2, 0);
+                           
+                        }
+                        gpio_set_level(GPIO_RELAY_CRUSH, 0);
+                        ptr_pump_t->pump2_work=false;
+                        j=0;
+                    }
+            i++;
+            j++;
+             
+        }
+        
+        vTaskDelay(100/ portTICK_PERIOD_MS);
+    }
+    
+}
+
 
 void app_main()
 {
 
 
-    ptr_pump_t->led1_work=false;
-    ptr_pump_t->led2_work=false;
+    ptr_pump_t->pump1_work=false;
+    ptr_pump_t->pump2_work=false;
     ptr_pump_t->hours = 60*1;
     ptr_pump_t->period_save_nvs=60*0.5;
 
@@ -753,5 +834,7 @@ void app_main()
     xTaskCreate(check_time, "check_time", 4096, NULL, 5, NULL);
 
     xTaskCreate(check_acidification, "check_acidification", 4096, NULL, 5, NULL);
+
+    xTaskCreate(wifi_conrol, "wifi_conrol", 4096, NULL, 5, NULL);
 } 
 
