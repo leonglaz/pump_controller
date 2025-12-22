@@ -16,7 +16,7 @@ uint32_t wifi_hours=60;
 
 static const char html_template[] = 
 "<!DOCTYPE html><html><head>"
-"<meta charset=UTF-8><meta http-equiv=Refresh content=1 /><title>ESP32</title><meta name=viewport content='width=device-width,initial-scale=1'>"
+"<meta charset=UTF-8><meta http-equiv=Refresh content=10 /><title>ESP32</title><meta name=viewport content='width=device-width,initial-scale=1'>"
 "<style>"
 "body{font-family:Arial;text-align:center;margin:20px}"
 ".btn{padding:10px 20px;margin:5px;border:none;border-radius:4px;color:white;text-decoration:none;display:inline-block}"
