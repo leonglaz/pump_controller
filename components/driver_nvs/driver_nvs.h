@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "../../main/struct_pump.h"
 
 void driver_nvs_init();
 void driver_nvs_open();
@@ -15,5 +16,7 @@ void driver_nvs_commit();
 void driver_nvs_close();
 void driver_nvs_write_u8(uint8_t value_u8, char* key);
 void driver_nvs_read_u8(uint8_t* read_value, char* key);
+void driver_nvs_write_blob(struct_nvs_t nvs_value);
+void driver_nvs_read_blob(struct_nvs_t* ptr_nvs_value);
 
 #endif // DRIVER_NVS_H

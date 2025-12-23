@@ -12,7 +12,8 @@
 
 static const char *TAG_WIFI = "driver_wifi";
 struct_pump_t* wifi_ptr_pump;
-uint32_t wifi_hours=60;
+struct_nvs_t* wifi_ptr_nvs;
+
 
 static const char html_template[] = 
 "<!DOCTYPE html><html><head>"
@@ -35,17 +36,17 @@ static const char html_template[] =
         "<div><h2>Насос 2: <strong>%s</strong></h2>"
             "<a href=/pump2on class='btn on'>ВКЛ</a>"
             "<a href=/pump2off class='btn off'>ВЫКЛ</a></div>"
-        "<div><h2>Часы: <strong>%ld</strong></h2>"
+        "<div><h2>Часы: <strong>%d</strong></h2>"
         "<form method='POST' action='/'>"
             "<input type='number' name='hours' min='1' max='100'>"
             "<input type='submit' class='btn off' value='Сохранить'>"
         "</form></div>"
-        "<div><h2>Время для антизакисания: <strong>%ld</strong></h2>"
+        "<div><h2>Время для антизакисания: <strong>%d</strong></h2>"
         "<form method='POST' action='/'>"
             "<input type='number' name='acidification' min='1' max='100'>"
             "<input type='submit' class='btn off' value='Сохранить'>"
         "</form></div>"
-        "<div><h2>Время сохранений: <strong>%ld</strong></h2>"
+        "<div><h2>Время сохранений: <strong>%d</strong></h2>"
         "<form method='POST' action='/'>"
             "<input type='number' name='save' min='1' max='100'>"
             "<input type='submit' class='btn off' value='Сохранить'>"
@@ -134,8 +135,8 @@ static esp_err_t post_handler(httpd_req_t *req)
         if (new_hours >= 1) {
             
             
-            wifi_ptr_pump->hours = new_hours;
-            ESP_LOGI(TAG_WIFI, "Новое время смены насосов: %d",wifi_ptr_pump->hours);
+            wifi_ptr_nvs->change_time = new_hours;
+            ESP_LOGI(TAG_WIFI, "Новое время смены насосов: %d",wifi_ptr_nvs->change_time);
         }
     }
 
@@ -147,8 +148,8 @@ static esp_err_t post_handler(httpd_req_t *req)
         if (new_acidification >= 1) {
             
             
-            wifi_ptr_pump->timer_acidification = new_acidification;
-            ESP_LOGI(TAG_WIFI, "Новое время антизакисания: %d",wifi_ptr_pump->timer_acidification);
+            wifi_ptr_nvs->timer_acidification = new_acidification;
+            ESP_LOGI(TAG_WIFI, "Новое время антизакисания: %d",wifi_ptr_nvs->timer_acidification);
         }
     }
 
@@ -160,8 +161,8 @@ static esp_err_t post_handler(httpd_req_t *req)
         if (new_save >= 1) {
             
             
-            wifi_ptr_pump->period_save_nvs = new_save;
-            ESP_LOGI(TAG_WIFI, "Новое время сохранений: %d",wifi_ptr_pump->period_save_nvs);
+            wifi_ptr_nvs->time_save_nvs = new_save;
+            ESP_LOGI(TAG_WIFI, "Новое время сохранений: %d",wifi_ptr_nvs->time_save_nvs);
         }
     }
     
@@ -184,9 +185,9 @@ static esp_err_t get_handler(httpd_req_t *req)
     control_status,
     pump1_status, 
     pump2_status, 
-    wifi_ptr_pump->hours, 
-    wifi_ptr_pump->timer_acidification, 
-    wifi_ptr_pump->period_save_nvs);
+    wifi_ptr_nvs->change_time, 
+    wifi_ptr_nvs->timer_acidification, 
+    wifi_ptr_nvs->time_save_nvs);
     
     if (len > 0 && len < sizeof(response)) {
         httpd_resp_set_type(req, "text/html");
@@ -330,7 +331,8 @@ void start_webserver(void)
     }
 }
 
-void wifi_set_struct_pump(struct_pump_t* ptr_struct_t)
+void wifi_set_struct_pump(struct_pump_t* ptr_struct_t, struct_nvs_t* ptr_nvs)
 {
     wifi_ptr_pump=ptr_struct_t;
+    wifi_ptr_nvs=ptr_nvs;
 }

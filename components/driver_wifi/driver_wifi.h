@@ -11,5 +11,5 @@
 
 void wifi_init_softap(void);
 void start_webserver(void);
-void wifi_set_struct_pump(struct_pump_t* ptr_struct_t);
+void wifi_set_struct_pump(struct_pump_t* ptr_struct_t, struct_nvs_t* ptr_nvs);
 #endif // DRIVER_WIFI_H

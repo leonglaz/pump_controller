@@ -104,4 +104,33 @@ void driver_nvs_read_u8(uint8_t* read_value, char* key)
     driver_nvs_close();
 }
 
-   
+void driver_nvs_write_blob(struct_nvs_t nvs_value)
+{   
+    driver_nvs_open();
+    //ESP_LOGI(TAG, "\nWriting blob to NVS...");
+
+    err = nvs_set_blob(my_handle, "nvs_t", &nvs_value, sizeof(struct_nvs_t));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write blob!");
+    }
+    driver_nvs_commit();
+    driver_nvs_close();
+}
+void driver_nvs_read_blob(struct_nvs_t* ptr_nvs_value)
+{   
+    driver_nvs_open();
+    //ESP_LOGI(TAG, "\nReading counter from NVS...");
+    size_t nvs_data_size = sizeof(struct_nvs_t);
+    err = nvs_get_blob(my_handle, "nvs_t", ptr_nvs_value, &nvs_data_size);
+    switch (err) {
+        case ESP_OK:
+            ESP_LOGI(TAG, "Blob read");
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            ESP_LOGW(TAG, "The value is not initialized yet!");
+            break;
+        default:
+            ESP_LOGE(TAG, "Error (%s) reading!", esp_err_to_name(err));
+    }
+    driver_nvs_close();
+}
